@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-06-22 — Remote H200 box inventory  #finding
+
+**Context:** Inventoried `trinity-gpu` (read-only) before writing the remote setup path.
+
+**Findings:**
+- **Ubuntu 24.04**, **192 vCPU**, **~2 TB RAM**. `$HOME` = `/mnt/data/harshal` on a 12 TB array
+  with **3.2 TB free** — ample for HF model caches.
+- **8× NVIDIA H200 NVL (143 GB each)**, driver `595.71.05`. **We use index 5 only.**
+- Python **3.12.3** present; **no `uv`, no `conda`, no `torch`** system-wide → `setup_remote.sh`
+  installs `uv` and builds a project `.venv`.
+- Network: `huggingface.co` → 200 (model downloads OK). `api.fireworks.ai` root → 404, which is
+  expected (the API lives under `/inference/v1`; root has no handler). Not a problem.
+- No pre-existing `~/trinity`; we sync there fresh.
+
+**Decision:** default `TRINITY_REMOTE_DIR=$HOME/trinity` (= `/mnt/data/harshal/trinity`),
+`HF_HOME` under the project dir to avoid polluting shared `$HOME`.
+
+---
+
 ## 2026-06-22 — Project bootstrap & environment verification  #finding #decision
 
 **Context:** Kicking off the replication. Verified the full toolchain before writing code.
