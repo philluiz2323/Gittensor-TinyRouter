@@ -18,6 +18,30 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-06-23 — Pilot #3 (full_pilot): 12 generations complete, no crashes  #repro #finding
+
+**Result:** First end-to-end training run to **complete all 12 generations** (math500, λ=8, m_cma=8,
+3 turns, 64 train tasks) — the timeout-retry + degrade-to-0 fixes held the entire run, zero crashes.
+
+```
+gen0 0.094  gen1 0.266  gen2 0.469  gen3 0.500  gen4 0.422  gen5 0.406
+gen6 0.297  gen7 0.391  gen8 0.359  gen9 0.469  gen10 0.469  gen11 0.250    (per-gen mean fitness)
+```
+
+**Read:** strong early learning (mean 0.094→0.50 over gens 0–3), then the population mean plateaus
+and oscillates ~0.25–0.47. `best_fitness` (es.best) = 0.75. `best_theta.npy` saved.
+
+**Caveat (honest):** the cross-generation mean is confounded — common random numbers re-samples a
+*different* minibatch each generation, so a harder draw lowers that gen's mean independent of policy
+quality (e.g. gen11's 0.250 is likely a hard draw, not regression). So this curve shows "it learned"
+but is NOT a clean convergence curve. The decisive measurement is the held-out eval (running now):
+TRINITY vs each single model vs random routing on fresh math500 test items (R1/R2/R4).
+
+**Possible next improvements (if eval is inconclusive):** (a) a fixed validation minibatch to make
+gen means comparable, (b) larger m_cma to cut reward variance, (c) more generations / σ tuning.
+
+---
+
 ## 2026-06-22 — Pilot #2 (CRN): J climbs, then crashes on httpx.ReadTimeout  #repro #mistake #finding
 
 **Result (the headline so far):** with common random numbers, **sep-CMA-ES learns** — clean upward J:
