@@ -333,3 +333,27 @@ retried (robustness fix), so throughput is shared, not 5×. Real benchmarks limi
 **Plan:** when all finish, eval each coordinator on its held-out test set, then report
 TRINITY-per-task (mean±std over seeds) vs best single fixed model on the math+mmlu average = the R1/R2
 headline test.
+
+---
+
+## 2026-06-23 — Cost tracking added  #decision #finding
+
+**Context:** User asked to track Fireworks cost. No usable billing API (probed: `/v1/usage`→404,
+`/v1/accounts/usage`→403), but every chat response carries exact token counts, so we price from tokens.
+
+**Built:**
+- `scripts/cost_report.py` — `--ledger` (exact, from recorded tokens) or `--estimate` (from run configs).
+- `FireworksPool` now appends `{model, prompt_tok, completion_tok}` to `$TRINITY_COST_LEDGER` per call
+  (best-effort JSONL) → future runs/evals are tracked exactly. The 5 in-flight runs predate this, so
+  they're estimated.
+
+**Empirical fact:** reasoning models fill ~all of `max_tokens` on completion (glm used 400/400),
+so completion_tokens ≈ max_tokens; prompt grows with the multi-turn transcript (~650 avg).
+
+**Estimate (ASSUMED prices, blended ~$0.67/1M in, $2.10/1M out — NOT confirmed):**
+- Spent so far (pilots + 2 evals): **≈ $5**.
+- Projected when the 5 current runs finish: **≈ $34 total** (~24M tokens, ~17k calls).
+- The 4 strong parallel runs dominate (~$6.4 each).
+
+**TODO:** get real per-model Fireworks rates from the dashboard to convert estimate → exact. Report a
+live cost line at each monitoring checkpoint (scale per-run cost by generations completed).

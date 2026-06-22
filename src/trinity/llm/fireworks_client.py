@@ -47,6 +47,24 @@ class _Retryable(Exception):
     """Wraps transient HTTP failures so tenacity retries them."""
 
 
+def _ledger_append(model: str, prompt_tokens: int, completion_tokens: int) -> None:
+    """Append one token-usage record to the cost ledger, if TRINITY_COST_LEDGER is set.
+
+    Used by scripts/cost_report.py to compute exact spend. Append-only JSONL, one short
+    line per call (atomic enough for concurrent training processes). Best-effort: never
+    let cost bookkeeping break an inference call.
+    """
+    path = os.environ.get("TRINITY_COST_LEDGER")
+    if not path:
+        return
+    try:
+        short = model.rsplit("/", 1)[-1]
+        with open(path, "a") as f:
+            f.write(f'{{"m":"{short}","p":{int(prompt_tokens)},"c":{int(completion_tokens)}}}\n')
+    except Exception:
+        pass
+
+
 class FireworksPool:
     """Async-first client over the Fireworks chat-completions endpoint."""
 
@@ -128,11 +146,14 @@ class FireworksPool:
             data = resp.json()
             choice = data["choices"][0]
             usage = data.get("usage", {})
+            pt = usage.get("prompt_tokens", 0)
+            ct = usage.get("completion_tokens", 0)
+            _ledger_append(payload["model"], pt, ct)
             return ChatResult(
                 model=payload["model"],
                 text=choice["message"]["content"],
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
+                prompt_tokens=pt,
+                completion_tokens=ct,
                 finish_reason=choice.get("finish_reason"),
                 raw=data,
             )
