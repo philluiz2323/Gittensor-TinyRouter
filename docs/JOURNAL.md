@@ -357,3 +357,13 @@ so completion_tokens ≈ max_tokens; prompt grows with the multi-turn transcript
 
 **TODO:** get real per-model Fireworks rates from the dashboard to convert estimate → exact. Report a
 live cost line at each monitoring checkpoint (scale per-run cost by generations completed).
+
+---
+
+## 2026-06-23 — Real Fireworks prices → cost ~doubled  #finding
+
+Web search gave real serverless rates ($/1M, in/out): deepseek-v4-pro **1.74 / 3.48**,
+kimi-k2p6 **0.95 / 4.00**, glm-5p2 **1.40 / 4.40** (GLM-5.1 proxy; 5.2 not separately listed).
+Output is ~$4/M, so the projection rose from ~$34 (assumed) to **~$65 total** (~$10 spent so far;
+the 4 strong parallel runs ~$12 each). All 5 runs confirmed RUNNING. Caching (~50% off cached input)
+ignored, so this slightly over-estimates.

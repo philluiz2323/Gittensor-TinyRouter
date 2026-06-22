@@ -23,12 +23,16 @@ import argparse
 import json
 import sys
 
-# ---- ASSUMED Fireworks serverless prices ($ per 1M tokens). EDIT TO REAL VALUES. ----
-# (in, out). Ballpark for large reasoning models circa 2025-26; confirm on the dashboard.
+# ---- Fireworks serverless prices ($ per 1M tokens), (input, output). ----
+# Real rates from Fireworks pricing (web search, June 2026):
+#   deepseek-v4-pro $1.74 in / $3.48 out ($0.145 cached in)
+#   kimi-k2p6 (K2.6) $0.95 in / $4.00 out ($0.16 cached in)
+#   glm-5p2: GLM 5.1 listed at $1.40 / $4.40 — used as proxy for GLM 5.2 (5.2 not separately listed).
+# Cached input tokens get ~50% off; we ignore caching here (slight over-estimate).
 PRICES = {
-    "deepseek-v4-pro": (0.90, 2.50),
-    "glm-5p2":         (0.50, 1.80),
-    "kimi-k2p6":       (0.60, 2.00),
+    "deepseek-v4-pro": (1.74, 3.48),
+    "glm-5p2":         (1.40, 4.40),
+    "kimi-k2p6":       (0.95, 4.00),
 }
 _DEFAULT_BLENDED_IN = sum(p[0] for p in PRICES.values()) / len(PRICES)
 _DEFAULT_BLENDED_OUT = sum(p[1] for p in PRICES.values()) / len(PRICES)
@@ -109,7 +113,8 @@ def report_estimate(in_rate: float, out_rate: float, avg_turn_frac: float = 0.7,
         print(f"{name:22s} {calls:7.0f} {tok:7.2f} {d:8.2f}  {status}")
     print("-" * 60)
     print(f"{'TOTAL (when all finish)':22s} {grand_calls:7.0f} {grand_tok:7.2f} ${grand_cost:8.2f}")
-    print("\nNOTE: prices are ASSUMED — give me the real per-model Fireworks rates for exact $.")
+    print("\nNOTE: real Fireworks rates (web, Jun 2026); glm-5p2 uses GLM-5.1 as proxy. Token/turn "
+          "counts are estimated (in-flight runs predate the ledger); caching discount ignored.")
 
 
 def main() -> None:
