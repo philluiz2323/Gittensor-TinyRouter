@@ -18,6 +18,38 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-06-23 — Held-out eval: R4 holds, R1/R2 ties on single task → need multi-task  #repro #finding #decision
+
+**Eval (40 held-out math500 items, trained `full_pilot` θ):**
+
+| condition | acc |
+|---|---|
+| single deepseek-v4-pro | 0.325 |
+| single **glm-5p2** | **0.550** (best single) |
+| single kimi-k2p6 | 0.275 |
+| **TRINITY (trained)** | **0.550** |
+| random routing | 0.350 |
+
+- **R4 ✅** TRINITY (0.55) > random routing (0.35). The learned coordinator is meaningfully better
+  than random — it discovered that **glm-5p2 is the math specialist** and routes to it.
+- **R1/R2 ❌ (tie, not a win):** TRINITY (0.55) = best single model glm-5p2 (0.55).
+
+**Why this is the EXPECTED outcome, not a failure (#finding):** on a SINGLE benchmark, pure routing
+can at best *match* the best model (by always picking it) — there's no headroom to *exceed* it unless
+multi-turn Thinker→Worker→Verifier collaboration adds value, which 3 turns / 640 tokens barely
+exercises. The paper's "TRINITY > best single model" headline is on the **average across 4 diverse
+tasks**, where *no single model wins them all* — that's where per-task routing beats any fixed model.
+We replicated the routing mechanism on one task (it found the specialist + beat random); to replicate
+the *headline* we need the multi-task setting. Eval is also noisy at n=40 (±~8%), so 0.55 vs 0.55 is a
+statistical tie.
+
+**Decision / next:** map single-model strengths across ≥2 benchmarks (math500 + a second where a
+*different* model wins, e.g. gpqa/livecodebench). If models split, a per-task router beats best-single
+on the average — the real R1/R2 test. Train a coordinator per task (paper protocol) and report the
+multi-task average.
+
+---
+
 ## 2026-06-23 — Pilot #3 (full_pilot): 12 generations complete, no crashes  #repro #finding
 
 **Result:** First end-to-end training run to **complete all 12 generations** (math500, λ=8, m_cma=8,
