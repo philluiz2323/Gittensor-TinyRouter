@@ -18,6 +18,34 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-06-22 — Pilot #1: flat J → root cause = per-candidate minibatch noise → CRN fix  #mistake #finding #decision
+
+**Context:** First real pilot (math500, λ=6, m_cma=4, 12 gens). Ran clean across 5 generations on
+GPU 5 (no crashes, per-candidate fitness varied 0.0–1.0), but **mean fitness did not climb**:
+
+```
+gen0 mean=0.375  gen1 0.542  gen2 0.375  gen3 0.375  gen4 0.250   (max stuck at 1.0 = lucky minibatch)
+```
+
+**Root cause (#mistake in my training loop):** `minibatch_fn(i)` drew a *fresh random* minibatch for
+*each candidate* within a generation. With `m_cma=4` the per-candidate fitness is a mean of 4
+Bernoulli draws (std ≈ 0.25) AND each candidate saw *different tasks* — so sep-CMA-ES was ranking
+candidates largely by task-luck, not policy quality. The "best=1.0" was one candidate that drew 4
+easy problems, not a good coordinator. This is precisely the binary-reward variance risk flagged in
+SPEC §0.4 and the review (#5).
+
+**Fix / decision (#decision):** **Common Random Numbers (CRN)** — score *all* candidates in a
+generation on the *same* minibatch (re-sampled across generations). Standard ES variance-reduction:
+fitness *differences* now reflect policy differences, not which tasks were drawn. Also raised
+`m_cma 4 → 8` to halve the reward-estimate std. Re-launched as `pilot_crn`. This is a deliberate
+[OUR CHOICE] deviation from the paper's "re-sample per replication" phrasing; documented because it
+materially changes the optimizer's signal.
+
+**Lesson:** for noisy-reward ES, *how* you sample the fitness minibatch matters as much as the
+optimizer. Watch whether `pilot_crn` shows a cleaner upward J trend.
+
+---
+
 ## 2026-06-22 — GPU env up; full smoke ladder S1-S8 PASS; pilot training launched  #repro #finding #gotcha
 
 **Context:** Provisioned the H200 box and ran the GPU/network smoke rungs, then launched training.
