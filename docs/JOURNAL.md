@@ -18,6 +18,42 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-06-22 — Core implemented; CPU smoke rungs green; review bugs fixed  #repro #mistake #finding
+
+**Context:** Implemented all modules (coordinator, roles, orchestration, sep-CMA-ES, train/eval)
+via a parallel build + adversarial integration review, then validated the CPU smoke ladder.
+
+**Integration review caught 3 real bugs (fixed before any GPU/LLM spend):**
+- **#mistake P0 — LiveCodeBench reward was identically 0.** `reward._run_one_test` read stdin from
+  `test["stdin"]` but `dataset.py` emits `{"input":..., "output":...}`, so every code test ran on
+  empty stdin → reward 0 for every candidate → CMA would optimize against a dead signal. Fixed to
+  read `test.get("stdin", test.get("input",""))` and trigger on `input`/`output` keys.
+- **#mistake P1 — `trinity.optim` couldn't import without pycma.** `sep_cmaes.py` re-raised the
+  `cma` ImportError at module top. Deferred it into `_import_cma()` (cma is only needed to build
+  the optimizer at train time).
+- **#mistake P2 — choice-letter extractor matched prose.** `"A nice approach"` → `"A"`. Tightened
+  the regexes + restricted the fallback to a final standalone-letter line. Also fixed plain-text
+  fraction extraction (`"1/2"` was read as `"2"`).
+
+**Smoke ladder (SPEC §11), CPU rungs run locally — ALL PASS:**
+- S3 params pack/unpack round-trip, `n_total=13312`, head `(6,1024)`, `n_svf=7168`.
+- S4 multi-turn termination + worker-guarded Verifier-ACCEPT + fail-safe REVISE.
+- S5 reward checkers (math incl. fractions, MMLU/GPQA letters, code pass@1 with stdin).
+- S7 sep-CMA-ES maximizes a synthetic objective; `popsize(13312)=33` confirmed.
+
+**Follow-up:** provision GPU box env, run GPU rungs S1 (encoder/penultimate), S2 (SVF identity +
+real scale count), S6 (live pool), S8 (end-to-end fitness), then launch sep-CMA-ES training on GPU 5.
+
+---
+
+## 2026-06-22 — Fireworks reasoning-effort mapping resolved  #finding #decision
+
+**Context:** SPEC left "minimal reasoning effort" → API param unspecified (open item #12/#16).
+**Finding:** all 3 models accept `reasoning_effort` ∈ {none, low, medium, high} (HTTP 200).
+**Decision:** map "minimal" → `reasoning_effort: "low"` in `FireworksPool.chat`; configurable.
+
+---
+
 ## 2026-06-22 — Paper → SPEC, with verified facts & review corrections  #finding #decision #repro
 
 **Context:** Ran a 9-agent deep read of the paper → `docs/SPEC.md` (+ `PAPER_NOTES.md`,

@@ -85,7 +85,7 @@ async def train(args) -> dict:
     history: list[dict] = []
 
     run_kwargs = dict(
-        max_turns=sess.get("max_turns", 5),
+        max_turns=args.max_turns or sess.get("max_turns", 5),
         max_tokens=args.max_tokens,
         reasoning=args.reasoning,
         verifier_requires_prior_worker=sess.get("verifier_requires_prior_worker", True),
@@ -147,6 +147,7 @@ def main() -> None:
     ap.add_argument("--config", default=str(_REPO / "configs" / "trinity.yaml"))
     ap.add_argument("--models", default=str(_REPO / "configs" / "models.yaml"))
     ap.add_argument("--max-items", type=int, default=256, dest="max_items")
+    ap.add_argument("--max-turns", type=int, default=0, dest="max_turns", help="override K")
     ap.add_argument("--max-tokens", type=int, default=4096, dest="max_tokens")
     ap.add_argument("--reasoning", default="minimal")
     ap.add_argument("--generations", type=int, default=0, help="override config T")
@@ -159,6 +160,7 @@ def main() -> None:
     args.generations = args.generations or None
     args.popsize = args.popsize or None
     args.m_cma = args.m_cma or None
+    args.max_turns = args.max_turns or None
     asyncio.run(train(args))
 
 

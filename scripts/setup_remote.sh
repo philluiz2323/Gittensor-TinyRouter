@@ -10,8 +10,9 @@ LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "[setup_remote] syncing $LOCAL_DIR -> $HOST:$REMOTE_DIR (excluding secrets/artifacts)"
 rsync -az --delete \
-  --exclude '.git' --exclude '.venv' --exclude 'experiments/*/runs' \
-  --exclude '*.pdf' --exclude '.env' --exclude 'secrets.env' \
+  --exclude '.git' --exclude '.venv' --exclude '.venv*' --exclude '__pycache__' \
+  --exclude 'experiments' --exclude '*.pdf' --exclude '.env' --exclude 'secrets.env' \
+  --exclude '*.npy' --exclude 'docs/paper' \
   "$LOCAL_DIR/" "$HOST:$REMOTE_DIR/"
 
 echo "[setup_remote] installing env + checking GPU 5 on $HOST"
