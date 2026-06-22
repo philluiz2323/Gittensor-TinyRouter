@@ -78,6 +78,10 @@ class FireworksPool:
             return name
         raise KeyError(f"Unknown model '{name}'. Known: {list(self.models)}")
 
+    # "minimal reasoning effort" (paper §4.1) → Fireworks `reasoning_effort`.
+    # Verified that deepseek-v4-pro / glm-5p2 / kimi-k2p6 all accept low|none.
+    _REASONING_MAP = {"minimal": "low", "low": "low", "none": "none", "medium": "medium", "high": "high"}
+
     async def chat(
         self,
         model: str,
@@ -86,6 +90,7 @@ class FireworksPool:
         temperature: float = 0.7,
         top_p: float = 0.95,
         max_tokens: int = 4096,
+        reasoning: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> ChatResult:
         payload = {
@@ -95,6 +100,8 @@ class FireworksPool:
             "top_p": top_p,
             "max_tokens": max_tokens,
         }
+        if reasoning is not None:
+            payload["reasoning_effort"] = self._REASONING_MAP.get(reasoning, reasoning)
 
         @retry(
             retry=retry_if_exception_type(_Retryable),
