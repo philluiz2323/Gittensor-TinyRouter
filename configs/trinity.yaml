@@ -1,0 +1,48 @@
+# Coordinator + evolutionary-training config.
+# Values marked [provisional] are placeholders pending docs/SPEC.md extraction
+# from the paper. Do not treat them as paper-faithful until SPEC confirms them.
+
+coordinator:
+  # Compact ~0.6B encoder whose hidden states contextualize the query.
+  # Paper uses a ~0.6B model; we default to a 0.6B open model and confirm in SPEC.
+  encoder_model: "Qwen/Qwen3-0.6B"     # [provisional — confirm exact model in SPEC]
+  device: "cuda:0"                      # maps to physical GPU 5 via CUDA_VISIBLE_DEVICES=5
+  dtype: "bfloat16"
+  hidden_state:
+    layer: -1                           # which transformer layer to read [provisional]
+    token: "penultimate"                # penultimate-token hidden state (per abstract)
+    pool: "none"                        # none | mean | last [provisional]
+
+  # Lightweight head (~10K params) mapping the hidden-state feature to a decision.
+  head:
+    type: "linear"                      # linear | mlp [provisional]
+    hidden_dim: 0                       # 0 = no hidden layer (pure linear) [provisional]
+    # Outputs: distribution over (model x role) actions + a stop action.
+    n_models: 3
+    n_roles: 3                          # Thinker, Worker, Verifier
+    include_stop_action: true
+    extra_features:                     # appended to the hidden-state feature vector
+      turn_index: true
+      role_history: true
+      model_history: true
+
+session:
+  max_turns: 6                          # [provisional]
+  budget_tokens: null                   # optional cap per query [provisional]
+  final_answer: "last_worker_or_verifier"  # how the final answer is extracted [provisional]
+
+# Separable CMA-ES — optimizes the head's parameter vector. [provisional defaults]
+sep_cmaes:
+  population_size: null                 # lambda; null -> 4 + floor(3*ln(N)) default
+  mu: null                              # parents; null -> lambda/2
+  sigma0: 0.5                           # initial step size
+  generations: 100
+  eval_tasks_per_candidate: 64          # train-task minibatch per fitness eval
+  seed: 0
+  bounds: null
+  fitness:
+    metric: "accuracy"                  # task score to maximize
+    cost_penalty: 0.0                   # optional penalty on tokens/calls [provisional]
+
+baselines:
+  enabled: [random_routing, static_best, rl_reinforce, imitation]  # for the optimizer comparison

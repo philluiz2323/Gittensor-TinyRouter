@@ -1,0 +1,70 @@
+# ============================================================
+#  SECRETS — never commit. (Real secrets live OUTSIDE this repo,
+#  in ~/.ssh/ and ~/.config/trinity/. These rules are defense-in-depth.)
+# ============================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*id_ed25519*
+*id_rsa*
+*trinity_gpu*
+secrets.env
+secrets/
+**/secrets/
+*token*
+*apikey*
+*api_key*
+*.credentials
+
+# ============================================================
+#  Paper / large binaries (link to arXiv instead of committing 11MB)
+# ============================================================
+*.pdf
+docs/paper/trinity_paper.txt
+
+# ============================================================
+#  Experiment artifacts (logs, checkpoints, cache, datasets)
+# ============================================================
+experiments/**/runs/
+experiments/**/checkpoints/
+experiments/**/logs/
+experiments/**/cache/
+*.ckpt
+*.pt
+*.safetensors
+*.npz
+*.npy
+wandb/
+data/
+datasets/
+.cache/
+hf_cache/
+
+# ============================================================
+#  Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv*/
+venv/
+env/
+.uv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ============================================================
+#  OS / editor
+# ============================================================
+.DS_Store
+*.swp
+.idea/
+.vscode/
+*.log
