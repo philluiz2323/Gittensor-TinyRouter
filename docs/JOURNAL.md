@@ -18,6 +18,37 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-06-23 — Oracle-ceiling diagnostic: math is ROUTER_BOUND (overturns the "math null" read)  #finding #repro #mistake
+
+**Context:** built `scripts/oracle_ceiling.py` (recommendation #1, branch `oracle-ceiling-diagnostic`) to
+answer whether routing can help at all on our 3-model pool, FP/FN-proof per the plan. Collected a
+per-(query,model) solve matrix (math K=5, MMLU K=3) on the box, $14 (separate `oracle_cost_ledger.jsonl`).
+
+**Result:**
+- **math500: ROUTER_BOUND.** Perfect router could reach **0.856** vs best-single 0.808 = **+0.049
+  headroom, 95% CI [0.005, 0.085]** (excludes 0). Naive oracle 0.900; cross-fit stripped 0.044 of
+  winner's-curse inflation. Models disagree on 29% of queries.
+- **mmlu: INCONCLUSIVE at K=3.** Threshold headroom +0.025, CI [0, 0.058]; deepseek dominates (0.94).
+  Near-ceiling in practice (TRINITY already ≈ best-single).
+
+**Finding that matters (#finding):** this **overturns** the earlier "math routing gives no benefit"
+read. That conclusion came from the trained router tying random/best-single — but the oracle shows there
+IS ~+4.9pt of *achievable* headroom on math; our router just captures none of it. So math is limited by
+the **router, not the pool** → the warm-start (#2) + shaped-fitness (#3) upgrades are justified, with a
+concrete target (math oracle 0.856). The diagnostic earned its keep by catching this false-negative.
+
+**#mistake (caught by the diagnostic's own guard):** MMLU at K=3 first produced an *impossible* negative
+headroom (routing_oracle 0.750 < best_single 0.939). Cause: cross-fit splits K in half, so K=3 leaves 1
+selection sample/query and the argmax misroutes. Fix: floor the oracle at best_single (a perfect router
+can always fall back to the best fixed model), flag `crossfit_reliable=false` when K<5, and base the
+verdict on the split-free threshold headroom. Added selftest (e). Cross-fit needs **K>=5** (n_a>=2).
+
+**#gotcha:** the K=6 MMLU re-collect (for a valid cross-fit) was abandoned after Fireworks latency
+spiked (throughput fell ~38→4 calls/min, ~5h ETA, no errors). MMLU verdict stands on the threshold
+estimate + rigorous-eval evidence; re-collect at K>=5 when the API is healthy for the exact number.
+
+---
+
 ## 2026-06-23 — RIGOROUS final eval (n=120, baselines ×3 reps): math null, MMLU win, thin multi-task win  #repro #finding
 
 **Context:** the n=40 per-coordinator numbers were too noisy (same baseline swung 0.45–0.79 across runs).

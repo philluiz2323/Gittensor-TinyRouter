@@ -68,6 +68,7 @@ class CeilingStats:
     routing_oracle_thresh: float           # hard p>=0.5 oracle (threshold sensitivity)
     best_single_thresh: float              # hard p>=0.5 best single
     routing_headroom_thresh: float         # threshold-version headroom
+    crossfit_reliable: bool = True         # False when K<5 (cross-fit selection half too small)
 
 
 def _validate_solves(S: np.ndarray) -> np.ndarray:
@@ -229,7 +230,14 @@ def compute_stats(S: np.ndarray, *, crossfit_splits: int = 200, seed: int = 0) -
     # Cross-fit oracle AND cross-fit best_single, both on the held-out half: their
     # difference is the unbiased headroom (see crossfit_oracle_and_best). Headroom uses
     # the cross-fit best_single so the two terms share the same estimation regime.
-    oracle, bs_cf = crossfit_oracle_and_best(S, n_splits=crossfit_splits, seed=seed)
+    oracle_raw, bs_cf = crossfit_oracle_and_best(S, n_splits=crossfit_splits, seed=seed)
+    # A perfect router can always fall back to the best fixed model, so the TRUE oracle is
+    # mathematically >= best_single. A cross-fit estimate below it means the selection half
+    # is data-starved (K<5 -> n_a = K//2 < 2, i.e. <=1 selection sample per query, so the
+    # argmax misroutes). Floor the oracle at best_single and flag the cross-fit unreliable;
+    # at low K the verdict falls back to the split-free threshold headroom instead.
+    crossfit_reliable = K >= 5
+    oracle = max(oracle_raw, bs_cf)
     oracle_naive = routing_oracle_naive(p)
     clair = clairvoyant_any(p)
     o_thr, bs_thr, h_thr = _threshold_oracle(p)
@@ -249,6 +257,7 @@ def compute_stats(S: np.ndarray, *, crossfit_splits: int = 200, seed: int = 0) -
         routing_oracle_thresh=o_thr,
         best_single_thresh=bs_thr,
         routing_headroom_thresh=h_thr,
+        crossfit_reliable=crossfit_reliable,
     )
 
 
@@ -295,14 +304,17 @@ def bootstrap_all(S: np.ndarray, *, n_boot: int = 2000, seed: int = 0,
     # the headroom CI matches the headroom point estimate (both use cross-fit best_single).
     def stat_vec(s):
         oracle, bs_cf = crossfit_oracle_and_best(s, n_splits=crossfit_splits, seed=seed)
+        oracle = max(oracle, bs_cf)  # mathematical floor (see compute_stats)
         clair = clairvoyant_any(p_hat(s))
         bs_full = best_single(p_hat(s))[0]
+        _, _, h_thr = _threshold_oracle(p_hat(s))  # split-free, robust at low K
         return {
             "best_single": bs_full,
             "routing_oracle": oracle,
             "clairvoyant_any": clair,
             "routing_headroom": oracle - bs_cf,
             "unroutable_noise": clair - oracle,
+            "routing_headroom_thresh": h_thr,
         }
 
     S = _validate_solves(S)
@@ -425,6 +437,7 @@ def analyze_matrix(
         "benchmark": matrix.get("benchmark"),
         "level": matrix.get("level"),
         "k": stats.k,
+        "crossfit_reliable": stats.crossfit_reliable,
         "n_queries": stats.n_queries,
         "models": models,
         "per_model_accuracy": dict(zip(models, stats.per_model)),
@@ -478,7 +491,12 @@ def _verdict(report: dict) -> dict:
     router-bound: headroom CI lower bound > 0 AND (if known) gap_closed < 0.5.
     near-ceiling: headroom real AND gap_closed high.
     """
-    h = report["bootstrap_ci_95"]["routing_headroom"]
+    reliable = report.get("crossfit_reliable", True)
+    ci = report["bootstrap_ci_95"]
+    # At low K the cross-fit selection half is data-starved, so base the verdict on the
+    # split-free threshold headroom (robust at any K) and label the basis honestly.
+    h = ci["routing_headroom"] if reliable else ci.get("routing_headroom_thresh", ci["routing_headroom"])
+    basis = "cross-fit" if reliable else "threshold (cross-fit unreliable at K<5)"
     lo, hi = h["ci_lo"], h["ci_hi"]
     includes_zero = lo <= 0.0 <= hi
     tri = report.get("trinity", {})
@@ -505,8 +523,11 @@ def _verdict(report: dict) -> dict:
         label = "INCONCLUSIVE"
         msg = ("Headroom CI straddles 0 but upper bound > 0.02: cannot rule routing in "
                "or out. Widen the reachability level (L1/L2) or collect more samples.")
-    return {"label": label, "headroom_ci_95": [lo, hi], "router_gap_closed": gap,
-            "message": msg}
+    if not reliable:
+        msg = ("[K<5: cross-fit oracle was data-starved and floored at best_single; verdict "
+               "uses the split-free threshold headroom] ") + msg
+    return {"label": label, "headroom_basis": basis, "headroom_ci_95": [lo, hi],
+            "router_gap_closed": gap, "message": msg}
 
 
 # =============================================================================
@@ -736,6 +757,20 @@ def _selftest() -> int:
           abs(cf - 0.5) < abs(naive - 0.5))
     check("(d) cross-fit reduces bias by a clear margin",
           (naive - 0.5) - abs(cf - 0.5) > 0.02)
+
+    # (e) low-K guard: at K=3 the cross-fit underflows; oracle must be floored at
+    # best_single (never below) and flagged unreliable (no impossible negative headroom).
+    rng = np.random.default_rng(5)
+    # deepseek-like dominant model + two weaker, K=3 (the MMLU regime that broke before).
+    Q3 = 120
+    S_lowk = np.zeros((Q3, 3, 3))
+    S_lowk[:, 0, :] = (rng.random((Q3, 3)) < 0.94).astype(float)
+    S_lowk[:, 1, :] = (rng.random((Q3, 3)) < 0.79).astype(float)
+    S_lowk[:, 2, :] = (rng.random((Q3, 3)) < 0.52).astype(float)
+    st_lk = compute_stats(S_lowk, crossfit_splits=100, seed=0)
+    check("(e) low-K: crossfit flagged unreliable (K<5)", st_lk.crossfit_reliable is False)
+    check("(e) low-K: headroom floored at 0 (no impossible negative headroom)",
+          st_lk.routing_headroom >= -1e-9)
 
     # McNemar sanity: identical vectors -> p=1.0; fully discordant -> small p.
     mc_same = mcnemar(np.array([1, 0, 1, 1]), np.array([1, 0, 1, 1]))

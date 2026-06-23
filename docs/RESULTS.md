@@ -122,4 +122,40 @@ python scripts/cost_report.py --ledger cost_ledger.jsonl   # spend
 
 **$20.89** total (exact, from the token ledger at real Fireworks prices): deepseek $6.56, glm $6.70,
 kimi $7.64. Well under the ~$65 projected. Rates: deepseek-v4-pro $1.74/$3.48, glm-5p2 ~$1.40/$4.40,
-kimi-k2p6 $0.95/$4.00 per 1M in/out.
+kimi-k2p6 $0.95/$4.00 per 1M in/out. (Plus ~$14 for the oracle-ceiling diagnostic below, tracked
+separately in `oracle_cost_ledger.jsonl`.)
+
+## 8. Oracle-ceiling diagnostic (is routing even worth tuning on this pool?)
+
+Recommendation #1 from [`IMPROVEMENTS.md`](IMPROVEMENTS.md), built FP/FN-proof per
+[`ORACLE_CEILING_DIAGNOSTIC.md`](ORACLE_CEILING_DIAGNOSTIC.md) (`scripts/oracle_ceiling.py`). For each
+held-out query we draw K samples per model, estimate a per-(query,model) solve probability, and compute
+the best a **perfect query-conditional router** could reach (`routing_oracle`, winner's-curse-debiased
+by split-half cross-fit) vs the best single model. Verdict read off bootstrap CIs, not point estimates.
+Raw per-call logs: `experiments/final/oracle_raw_<bench>.jsonl`; reports: `oracle_report_<bench>.json`.
+
+| benchmark | best single | routing oracle | headroom (95% CI) | disagree | verdict |
+|---|---|---|---|---|---|
+| math500 (K=5) | 0.808 (glm) | **0.856** | **+0.049 [0.005, 0.085]** | 0.29 | **ROUTER_BOUND** |
+| mmlu (K=3) | 0.939 (deepseek) | ≥0.939 | +0.025 [0.000, 0.058] (threshold) | 0.50 | INCONCLUSIVE (K<5) |
+
+**Math — ROUTER_BOUND, and it overturns our earlier read.** A perfect router could reach 0.856 vs
+best-single 0.808: **+4.9pt of real, achievable headroom** (CI excludes 0). The naive "pick-the-max"
+oracle was 0.900; cross-fit stripped 0.044 of winner's-curse inflation. Our trained router captured
+**none** of this headroom (it tied best-single and random in §1). So the limit on math is the **router,
+not the pool** — the IMPROVEMENTS.md upgrades (warm-start the head, shaped fitness) are warranted. This
+corrects the §0/§4 reading of math as "no benefit": there *is* benefit available, our router just misses
+it. The diagnostic existed precisely to catch that false-negative.
+
+**MMLU — inconclusive at K=3, near-ceiling in practice.** MMLU was collected at K=3, where the cross-fit
+selection half is a single sample and the estimator underflows (it first returned an impossible negative
+headroom; the script now floors the oracle at best-single and falls back to the split-free threshold
+estimate, flagged `crossfit_reliable=false`). The threshold headroom is small (+2.5pt, CI [0, 5.8pt]) and
+straddles 0, so the diagnostic honestly returns INCONCLUSIVE. In practice MMLU is **near-ceiling**:
+deepseek dominates (0.94 vs glm 0.79, kimi 0.52) and TRINITY already ≈ best-single (§1, 0.925 vs 0.922),
+so the router already captures what little is there. A definitive MMLU cross-fit needs a K≥5 re-collect
+(attempted but abandoned after a Fireworks latency spike dropped throughput to ~4 calls/min).
+
+**Bottom line:** on this pool, **math is the place router improvements can pay off** (real headroom our
+router misses); MMLU is near-ceiling. Net next step from the diagnostic: pursue the warm-start + shaped-
+fitness upgrades and validate against the math oracle ceiling (0.856).
