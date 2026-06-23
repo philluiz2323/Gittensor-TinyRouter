@@ -24,11 +24,11 @@ rebuilt from scratch with an all open-source model pool served through Fireworks
 
 ## Model pool
 
-| Slot | Fireworks model ID                          | Strong at |
-| ---- | ------------------------------------------- | --------- |
-| A    | `accounts/fireworks/models/deepseek-v4-pro` | knowledge (MMLU) |
-| B    | `accounts/fireworks/models/glm-5p2`         | math |
-| C    | `accounts/fireworks/models/kimi-k2p6`       | general |
+| Slot | Model            | Strong at        |
+| ---- | ---------------- | ---------------- |
+| A    | `deepseek-v4-pro` | knowledge (MMLU) |
+| B    | `glm-5p2`         | math             |
+| C    | `kimi-k2p6`       | general          |
 
 The 0.6B encoder and the evolution loop run on a single NVIDIA H200; the three LLMs are called over HTTP.
 
