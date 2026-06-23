@@ -57,6 +57,17 @@ sep_cmaes:
     cost_penalty: 0.0                   # no explicit length/cost penalty (bounded by 4096 x K)
   budget_b_env: 31680                   # = m_cma * lambda * generations = 16 * 33 * 60
 
+# Training-only fitness shaping (improvement #3). Read by trinity.optim.fitness
+# .FitnessConfig.from_dict. DEFAULTS BELOW PRESERVE THE ORIGINAL MEAN-BINARY
+# FITNESS EXACTLY (enable_reweight off + zero-effect bonuses collapse to binary).
+# INVARIANT: this affects sep-CMA-ES TRAINING fitness ONLY; the eval path
+# (trinity.eval / reward.score) stays pure binary correct/incorrect.
+fitness:
+  enable_reweight: false   # variance-reweight tasks by population disagreement
+  format_bonus: 0.05       # reward for producing a parseable answer (any correctness)
+  turn_penalty: 0.05       # penalty proportional to (num_turns-1)/(max_turns-1)
+  hero_dense: false        # reserved: per-turn dense reward (currently unused)
+
 baselines:                              # for the optimizer comparison (R8)
   enabled: [random_routing, static_best, rl_reinforce, imitation_sft]
   random_search: { sample_range: [-0.5, 0.5], trials_per_candidate: 32 }

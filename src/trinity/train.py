@@ -23,7 +23,7 @@ import yaml
 from .coordinator import params as P
 from .coordinator.policy import CoordinatorPolicy
 from .llm.fireworks_client import FireworksPool
-from .optim.fitness import evaluate_population
+from .optim.fitness import FitnessConfig, evaluate_population
 from .optim.sep_cmaes import SepCMAES, default_popsize
 from .orchestration.dataset import load_tasks, sample_minibatch
 
@@ -34,11 +34,35 @@ def _load_yaml(path: str | Path) -> dict:
     return yaml.safe_load(Path(path).read_text())
 
 
+def _resolve_x0(args, spec) -> np.ndarray:
+    """CMA-ES initial mean: a supervised warm-start theta if given, else the zero init.
+
+    ``--warmstart-theta`` (IMPROVEMENTS.md #2) loads a pre-fit head produced by
+    ``scripts/warmstart_head.py``. Its length must match ``spec.n_total`` exactly,
+    otherwise it is a layout mismatch and we refuse to start (a silent reshape would
+    corrupt the head/SVF split).
+    """
+    from .coordinator import warmstart as WS
+
+    warm = getattr(args, "warmstart_theta", "") or ""
+    if not warm:
+        return P.initial_theta(spec)
+    theta = WS.load_warmstart_theta(warm, spec)  # validates length == spec.n_total
+    print(f"[train] warm-start x0 from {warm} (||head||={np.linalg.norm(theta[:spec.n_head]):.3f}, "
+          f"deviates from zero-init by {float(np.linalg.norm(theta - P.initial_theta(spec))):.3f})")
+    return theta
+
+
 async def train(args) -> dict:
     cfg = _load_yaml(args.config)
     cc = cfg["coordinator"]
     sc = cfg["sep_cmaes"]
     sess = cfg.get("session", {})
+    # Training-only fitness shaping (improvement #3). Defaults preserve the
+    # original mean-binary fitness exactly. The eval path stays pure binary.
+    fitness_cfg = FitnessConfig.from_dict(cfg.get("fitness"))
+    if fitness_cfg.enable_reweight or fitness_cfg.shaping_active:
+        print(f"[train] fitness shaping ACTIVE: {fitness_cfg}")
 
     pool = FireworksPool(args.models)
     pool_models = list(pool.models)
@@ -69,10 +93,12 @@ async def train(args) -> dict:
     generations = args.generations or sc.get("generations", 60)
     sigma0 = sc.get("sigma0", 0.1)
 
+    x0 = _resolve_x0(args, spec)
+
     es = SepCMAES(
         n=spec.n_total,
         sigma0=sigma0,
-        x0=P.initial_theta(spec),
+        x0=x0,
         popsize=popsize,
         seed=args.seed,
         maxiter=generations,
@@ -113,7 +139,7 @@ async def train(args) -> dict:
 
         fits = await evaluate_population(
             thetas, spec, policy, pool, pool_models, minibatch_fn,
-            sample=True, on_candidate=_on_cand, **run_kwargs
+            sample=True, on_candidate=_on_cand, fitness_cfg=fitness_cfg, **run_kwargs
         )
         es.tell(thetas, fits)
 
@@ -165,6 +191,9 @@ def main() -> None:
     ap.add_argument("--m-cma", type=int, default=0, dest="m_cma", help="override replications")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--run-name", default="run", dest="run_name")
+    ap.add_argument("--warmstart-theta", default="", dest="warmstart_theta",
+                    help="path to a warm-start theta .npy (scripts/warmstart_head.py); "
+                         "used as the sep-CMA-ES initial mean instead of the zero init")
     args = ap.parse_args()
     # argparse stores 0 for "not set" on the int overrides; normalize to None-ish.
     args.generations = args.generations or None

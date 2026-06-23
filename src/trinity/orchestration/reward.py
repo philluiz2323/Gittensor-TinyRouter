@@ -46,6 +46,7 @@ from trinity.types import Role, Task, Trajectory
 __all__ = [
     "score",
     "score_text",
+    "has_answer",
     "extract_boxed",
     "extract_last_number",
     "normalize_math_answer",
@@ -110,24 +111,44 @@ def _committed_answer(benchmark: str, traj: Trajectory) -> str:
     final = traj.final_answer or ""
     turns = getattr(traj, "turns", None) or []
 
-    def has_answer(txt: str) -> bool:
-        if not txt:
-            return False
-        if key in CHOICE_BENCHMARKS:
-            return extract_choice_letter(txt) is not None
-        if key in MATH_BENCHMARKS:
-            return extract_boxed(txt) is not None or extract_last_number(txt) is not None
-        if key in CODE_BENCHMARKS:
-            return "```" in txt or "def " in txt or "import " in txt
-        return False
-
-    if has_answer(final):
+    if has_answer(key, final):
         return final
     for tr in reversed(turns):
         txt = getattr(tr, "processed_output", "") or ""
-        if has_answer(txt):
+        if has_answer(key, txt):
             return txt
     return final
+
+
+def has_answer(benchmark: str, text: str) -> bool:
+    """Return ``True`` iff ``text`` contains an extractable answer for ``benchmark``.
+
+    This is the format-validity predicate used both for picking the committed
+    answer out of a multi-turn trajectory (:func:`_committed_answer`) and for the
+    ``format_bonus`` term of the *training-only* shaped fitness (see
+    :mod:`trinity.optim.fitness`). It re-uses the same ``extract_*`` helpers that
+    :func:`score` relies on, so "has an answer" stays consistent with "can be
+    scored". It does **not** judge correctness — only whether an answer is
+    present in a parseable form.
+
+    Args:
+        benchmark: Benchmark identifier (case-insensitive), e.g. ``"math500"``.
+        text: Candidate model output to inspect.
+
+    Returns:
+        ``True`` if an answer of the expected shape is present, else ``False``.
+        Unknown benchmarks return ``False`` (no shape to look for).
+    """
+    if not text:
+        return False
+    key = (benchmark or "").strip().lower()
+    if key in CHOICE_BENCHMARKS:
+        return extract_choice_letter(text) is not None
+    if key in MATH_BENCHMARKS:
+        return extract_boxed(text) is not None or extract_last_number(text) is not None
+    if key in CODE_BENCHMARKS:
+        return "```" in text or "def " in text or "import " in text
+    return False
 
 
 def score_text(benchmark: str, candidate: str, reference: object) -> float:
