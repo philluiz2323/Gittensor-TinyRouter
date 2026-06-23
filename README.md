@@ -119,4 +119,4 @@ Secrets never live in this repo: the SSH key sits in `~/.ssh/`, the Fireworks ke
 ## Cost
 
 **$20.89** total, exact from the token ledger at real Fireworks prices (deepseek $6.56, glm $6.70,
-kimi $7.64), well under the ~$65 we projected.
+kimi $7.64).
