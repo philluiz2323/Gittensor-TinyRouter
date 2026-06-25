@@ -89,13 +89,18 @@ class PromptedConductor:
 
     def __init__(self, pool, model: str, *, max_steps: int = MAX_STEPS,
                  sample_temperature: float = 0.7, greedy_temperature: float = 0.2,
-                 max_tokens: int = 1024):
+                 max_tokens: int = 1600, reasoning: str | None = "none"):
         self.pool = pool
         self.model = model
         self.max_steps = max_steps
         self.sample_temperature = sample_temperature
         self.greedy_temperature = greedy_temperature
+        # The Conductor emits the three lists DIRECTLY; a reasoning model that
+        # spends its token budget on chain-of-thought gets truncated before the
+        # lists appear (a parse-gate false reject). Default to no reasoning and a
+        # generous budget so the lists are emitted in full.
         self.max_tokens = max_tokens
+        self.reasoning = reasoning
 
     async def propose(
         self, task: Task, worker_names: list[str], *,
@@ -105,6 +110,8 @@ class PromptedConductor:
         messages = build_prompt(task, worker_names, max_steps=self.max_steps)
         temp = self.sample_temperature if sample else self.greedy_temperature
         kwargs = dict(temperature=temp, max_tokens=self.max_tokens)
+        if self.reasoning is not None:
+            kwargs["reasoning"] = self.reasoning
         if client is not None:
             kwargs["client"] = client
         res = await self.pool.chat(self.model, messages, **kwargs)

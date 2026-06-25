@@ -41,6 +41,18 @@ def test_committed_answer_recovers_from_a_non_boxed_final_step():
     assert is_correct(run, MATH) == 1  # not a false negative
 
 
+def test_dollar_amount_is_not_a_false_negative():
+    # Regression: "$18.90" gold vs "18.90" answer must grade correct (the shared
+    # grader stripped bare "$" before "\\$", leaving "\\18.90"). Surfaced by the
+    # math500 Conductor baseline (task math500-459).
+    from trinity.orchestration import reward as R
+
+    assert R.math_equal("18.90", "\\$18.90") is True
+    assert R.score_text("math500", "The total cost is $18.90.", "\\$18.90") == 1.0
+    run = _run("So the cost is $18.90.")
+    assert is_correct(run, Task(task_id="d", benchmark="math500", prompt="", answer="\\$18.90")) == 1
+
+
 def test_no_false_positive_from_prose_letter():
     # "A nice approach" must NOT be read as choice 'A' (the JOURNAL P2 bug).
     run = _run("A nice approach to this question.")

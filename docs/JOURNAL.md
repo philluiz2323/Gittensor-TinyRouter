@@ -18,6 +18,32 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-06-25, Fugu Conductor prompted-baseline on math500: 0.917 (multi-step lift, not routing); grader dollar FN fixed  #repro #finding #mistake
+
+**Context:** ran the zero-training prompted Conductor (deepseek-v4-pro emits the 3-list workflow; pool
+executes; FIXED grader) on the SAME 120 held-out math500 tasks as the oracle matrix. max_depth 0, reps 1,
+cost-capped, ledgered. Cost **$1.10** (445 calls).
+**Result:** accuracy **0.917**, parse rate 0.975. vs best-single glm 0.808, deepseek single-shot 0.783,
+TinyRouter router 0.792, random 0.792, single-pick ceiling 0.855. Paired McNemar vs best-single: b=15, c=3,
+**p_exact=0.0075**; router_gap_closed=2.3 (exceeds the single-pick ceiling).
+**Read (honest):** the lift is **multi-step test-time compute, NOT routing**. Token share: deepseek 203k
+completion toks vs glm 271, kimi 64, so the conductor sent ~all work to deepseek and ran it through a 2-3
+step decompose/solve/verify scaffold (+13 pts over deepseek single-shot). It beats the single-pick ceiling
+because multi-step solve/verify is a stronger computation than picking one model once. Learned routing is a
+separate lever GRPO would add. Cost ~3.6x a single-shot pass (the fanout tax).
+**FP/FN audit (the user's explicit ask):** 18-task spot-check printed gold vs grader-extracted vs verdict.
+**Zero false positives** (every grader-correct row had extracted==gold, incl. 0.09==9/100, \dfrac{2}{21}==
+\frac{2}{21}). **One false negative, FIXED:** math500-459 gold "$18.90" answer "18.90" graded wrong because
+`normalize_math_answer` stripped bare "$" before "\$", leaving "\18.90". Fixed in orchestration/reward.py
+(strip "\$" first) + regression test. This is a SHARED-grader bug, so it slightly understated the oracle
+matrix too; 0.917 is therefore a conservative lower bound (correcting 459 alone -> ~0.925). Grader errs only
+in the safe direction (correct marked wrong), never the dangerous one (wrong marked correct).
+**Decision / follow-up:** baseline is a genuine, verified result but single-rep; a 3-rep rerun (~$4) would
+tighten it. The headline open question for GRPO is whether learned routing + a learned workflow beats this
+strong-model multi-step scaffold, and at what cost. Full writeup: docs/fugu/BASELINE_RESULTS.md.
+
+---
+
 ## 2026-06-25, OpenFugu replication scaffold: Conductor (Fugu-Ultra) over our pool, offline-tested  #decision #finding #todo
 
 **Context:** new branch `openfugu-replication`. Built the Conductor / Fugu-Ultra tier the repo lacks,

@@ -292,8 +292,10 @@ def normalize_math_answer(ans: str | None) -> str:
     s = str(ans).strip()
     # Drop a leading "answer:" style prefix.
     s = re.sub(r"^(the\s+)?(final\s+)?answer(\s+is)?\s*[:=]?\s*", "", s, flags=re.I)
-    # Remove math-mode delimiters.
-    for tok in ("$", r"\left", r"\right", r"\!", r"\,", r"\;", r"\:", r"\(", r"\)"):
+    # Remove math-mode delimiters. Strip the escaped dollar ``\$`` BEFORE the bare
+    # ``$``; the reverse order leaves a stray backslash ("\$18.90" -> "\18.90")
+    # and turns a correct dollar answer into a false negative.
+    for tok in (r"\$", "$", r"\left", r"\right", r"\!", r"\,", r"\;", r"\:", r"\(", r"\)"):
         s = s.replace(tok, "")
     s = re.sub(r"\\text\s*\{([^{}]*)\}", r"\1", s)
     s = re.sub(r"\\mathrm\s*\{([^{}]*)\}", r"\1", s)
