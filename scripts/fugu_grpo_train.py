@@ -45,6 +45,18 @@ def _load_tasks(args):
     return tasks[: args.max_items] if args.max_items else tasks
 
 
+def _parse_thresholds(raw: str) -> list[float]:
+    out: list[float] = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        value = float(part)
+        if value > 0:
+            out.append(value)
+    return sorted(set(out))
+
+
 @dataclass
 class _Chat:
     text: str
@@ -81,12 +93,16 @@ async def _run(args) -> int:
         prices = {name: (0.0, 0.0) for name in pool.models}
         prices[CONDUCTOR_KEY] = (0.0, 0.0)
     else:
+        if args.max_cost_usd <= 0:
+            raise SystemExit("paid Fireworks mode requires --max-cost-usd > 0")
         from trinity.llm.fireworks_client import FireworksPool
 
         pool = FireworksPool(args.models)
         prices = price_table(conductor_local=True)
 
     pool_models = list(pool.models)
+    warn_thresholds = _parse_thresholds(args.cost_warn_usd)
+    warned: set[float] = set()
     backend = HFPolicyBackend(
         HFBackendConfig(
             model_name=args.model_name,
@@ -101,6 +117,16 @@ async def _run(args) -> int:
         ),
         worker_names=pool_models,
     )
+    warmup_stats = None
+    if args.format_warmup_steps > 0:
+        warmup_stats = backend.format_warmup(
+            tasks,
+            steps=args.format_warmup_steps,
+            batch_size=args.format_warmup_batch_size,
+            model_id=args.format_warmup_model_id,
+        )
+        print("[format-warmup] " + json.dumps(warmup_stats, default=str), flush=True)
+
     cfg = GRPOConfig(
         group_size=args.group_size,
         iterations=args.iterations,
@@ -125,7 +151,9 @@ async def _run(args) -> int:
                 "questions_per_iter": cfg.questions_per_iter,
                 "max_depth": cfg.max_depth,
                 "max_cost_usd": cfg.max_cost_usd,
+                "cost_warn_usd": warn_thresholds,
                 "proposal_prefix": args.proposal_prefix,
+                "format_warmup": warmup_stats,
             },
             indent=2,
         ),
@@ -135,6 +163,24 @@ async def _run(args) -> int:
     def _on_iter(rec):
         print("[iter] " + json.dumps(rec, default=str), flush=True)
 
+    def _on_cost(meter):
+        for threshold in warn_thresholds:
+            if threshold not in warned and meter.spend >= threshold:
+                warned.add(threshold)
+                print(
+                    "[cost-warning] "
+                    + json.dumps(
+                        {
+                            "threshold_usd": threshold,
+                            "spend_usd": round(meter.spend, 4),
+                            "cap_usd": meter.cap_usd,
+                            "llm_calls": meter.calls,
+                            "runs": meter.runs,
+                        }
+                    ),
+                    flush=True,
+                )
+
     out = await train(
         backend,
         tasks,
@@ -143,6 +189,7 @@ async def _run(args) -> int:
         cfg,
         prices=prices,
         on_iter=_on_iter,
+        on_cost=_on_cost,
     )
 
     out_dir = Path(args.out_dir)
@@ -177,8 +224,14 @@ def main() -> None:
     ap.add_argument("--max-prompt-tokens", type=int, default=4096, dest="max_prompt_tokens")
     ap.add_argument("--gradient-accumulation", type=int, default=1, dest="gradient_accumulation")
     ap.add_argument("--proposal-prefix", default="model_id = [", dest="proposal_prefix")
+    ap.add_argument("--format-warmup-steps", type=int, default=0, dest="format_warmup_steps")
+    ap.add_argument(
+        "--format-warmup-batch-size", type=int, default=1, dest="format_warmup_batch_size"
+    )
+    ap.add_argument("--format-warmup-model-id", type=int, default=0, dest="format_warmup_model_id")
     ap.add_argument("--max-depth", type=int, default=0, dest="max_depth")
     ap.add_argument("--max-cost-usd", type=float, default=0.0, dest="max_cost_usd")
+    ap.add_argument("--cost-warn-usd", default="50,100", dest="cost_warn_usd")
     ap.add_argument("--stub-pool", action="store_true", help="use fake workers; no API spend")
     ap.add_argument("--out-dir", default=str(_REPO / "experiments" / "fugu_grpo"), dest="out_dir")
     ap.add_argument("--summary-name", default="summary.json", dest="summary_name")

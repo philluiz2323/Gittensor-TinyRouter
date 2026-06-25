@@ -170,6 +170,57 @@ class HFPolicyBackend:
             "mean_abs_advantage": abs_adv_sum / max(1, n_samples),
         }
 
+    def format_warmup(
+        self,
+        tasks: list[Task],
+        *,
+        steps: int = 20,
+        batch_size: int = 1,
+        model_id: int = 0,
+    ) -> dict:
+        """Supervised grammar warmup on synthetic parseable workflows.
+
+        This is deliberately format-only: the target is a generic one-step
+        workflow that delegates solving to a worker. It does not teach task
+        answers or use paid worker calls; it only makes GRPO rollouts more
+        likely to pass the parser so rewards can start flowing.
+        """
+        torch = self.torch
+        self.model.train()
+        self.optimizer.zero_grad(set_to_none=True)
+
+        if not tasks or steps <= 0:
+            return {"steps": 0, "examples": 0, "mean_loss": 0.0}
+
+        losses: list[float] = []
+        examples = 0
+        accum = max(1, int(batch_size))
+        for step in range(steps):
+            task = tasks[step % len(tasks)]
+            proposal = _format_warmup_target(model_id)
+            loss, _ = self._sample_nll(task, proposal)
+            (loss / accum).backward()
+            losses.append(float(loss.detach().cpu()))
+            examples += 1
+            if examples % accum == 0:
+                if self.cfg.grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip)
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
+
+        if examples % accum:
+            if self.cfg.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip)
+            self.optimizer.step()
+            self.optimizer.zero_grad(set_to_none=True)
+
+        return {
+            "steps": steps,
+            "examples": examples,
+            "mean_loss": sum(losses) / max(1, len(losses)),
+            "target_model_id": model_id,
+        }
+
     def save_pretrained(self, path: str) -> None:
         self.model.save_pretrained(path)
         self.tokenizer.save_pretrained(path)
@@ -246,3 +297,11 @@ def _torch_dtype(torch, name: str):
     if key in {"fp32", "float32", "float"}:
         return torch.float32
     raise ValueError(f"unsupported dtype: {name}")
+
+
+def _format_warmup_target(model_id: int) -> str:
+    return (
+        f"model_id = [{int(model_id)}]\n"
+        'subtasks = ["Solve the problem and end with the final answer in the required format."]\n'
+        "access_list = [[]]"
+    )

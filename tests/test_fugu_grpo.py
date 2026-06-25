@@ -109,6 +109,25 @@ def test_cost_cap_aborts_training():
     assert out["iterations"] < 50
 
 
+def test_cost_callback_fires_per_rollout():
+    cfg = GRPOConfig(group_size=3, iterations=1, questions_per_iter=1)
+    backend = StubBackend(WF_OK)
+    seen = []
+    out = asyncio.run(
+        train(
+            backend,
+            [_task()],
+            StubPool(ct=100),
+            POOL,
+            cfg,
+            on_cost=lambda meter: seen.append((meter.runs, meter.spend)),
+        )
+    )
+    assert out["cost"]["runs"] == 3
+    assert [x[0] for x in seen] == [1, 2, 3]
+    assert all(spend > 0 for _, spend in seen)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

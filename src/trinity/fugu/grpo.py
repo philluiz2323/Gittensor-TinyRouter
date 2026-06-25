@@ -98,6 +98,7 @@ async def collect_group(
     meter: CostMeter | None = None,
     rng=None,
     client=None,
+    on_cost=None,
 ) -> GroupResult:
     """Sample ``cfg.group_size`` workflows for ``task``, run, score, and meter.
 
@@ -114,6 +115,8 @@ async def collect_group(
         )
         if meter is not None:
             meter.add_run(run)
+            if on_cost is not None:
+                on_cost(meter)
         runs.append(run)
         rewards.append(training_reward(run, task, partial=cfg.partial_reward))
         if meter is not None and meter.aborted:
@@ -156,6 +159,7 @@ async def train(
     rng=None,
     client=None,
     on_iter=None,
+    on_cost=None,
 ) -> dict:
     """GRPO training loop skeleton. Returns a summary including total cost.
 
@@ -181,7 +185,7 @@ async def train(
                 groups.append(
                     await collect_group(
                         backend, task, pool, pool_models, cfg,
-                        meter=meter, rng=rng, client=client,
+                        meter=meter, rng=rng, client=client, on_cost=on_cost,
                     )
                 )
         except CostCapExceeded:
