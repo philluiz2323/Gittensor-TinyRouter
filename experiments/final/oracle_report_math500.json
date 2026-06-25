@@ -2,6 +2,7 @@
   "benchmark": "math500",
   "level": "L0",
   "k": 5,
+  "crossfit_reliable": true,
   "n_queries": 120,
   "models": [
     "deepseek-v4-pro",
@@ -37,8 +38,8 @@
     },
     "routing_oracle": {
       "point": 0.8570277777777778,
-      "ci_lo": 0.8009993055555555,
-      "ci_hi": 0.9027236111111113
+      "ci_lo": 0.8011354166666669,
+      "ci_hi": 0.9027888888888888
     },
     "clairvoyant_any": {
       "point": 0.9099333333333334,
@@ -53,7 +54,12 @@
     "unroutable_noise": {
       "point": 0.05290555555555554,
       "ci_lo": 0.03692083333333342,
-      "ci_hi": 0.07389236111111132
+      "ci_hi": 0.07370236111111131
+    },
+    "routing_headroom_thresh": {
+      "point": 0.09166666666666667,
+      "ci_lo": 0.04166666666666663,
+      "ci_hi": 0.125
     }
   },
   "notes": {
@@ -61,13 +67,25 @@
     "routing_oracle": "winner's-curse-debiased via split-half cross-fit; this is the honest routing ceiling",
     "verdict_source": "read the verdict off CIs, never the point estimates"
   },
+  "trinity": {
+    "accuracy": 0.9166666666666666,
+    "router_gap_closed": 2.2995283018868,
+    "mcnemar_vs_best_single": {
+      "b_only_a": 15,
+      "c_only_b": 3,
+      "n_discordant": 18,
+      "p_exact": 0.007537841796875,
+      "chi2_cc": 6.722222222222222
+    }
+  },
   "verdict": {
-    "label": "ROUTER_BOUND",
+    "label": "NEAR_CEILING",
+    "headroom_basis": "cross-fit",
     "headroom_ci_95": [
       0.004689583333333336,
       0.08486388888888903
     ],
-    "router_gap_closed": null,
-    "message": "Real headroom exists (CI lower bound > 0); router gap_closed unknown (no TRINITY data supplied). Routing improvements are warranted."
+    "router_gap_closed": 2.2995283018868,
+    "message": "Real headroom exists and the router already captures most of it. Gains require a better pool, not more router tuning."
   }
 }
