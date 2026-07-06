@@ -1,3 +1,5 @@
+<img src="Gittensor-TinyRouter.png" alt="TinyRouter — Evolved LLM Coordinator" width="100%">
+
 # TinyRouter
 
 Evolved LLM coordinator — a **routing accuracy competition** on
