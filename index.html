@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyRouter — Evolved LLM Coordinator</title>
+<meta name="description" content="Routing accuracy competition on Gittensor. Train a coordinator head, beat the current best, earn TAO.">
+<style>
+  :root {
+    --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e;
+    --fg: #cdd6f4; --muted: #6c7086; --accent: #89b4fa;
+    --green: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af;
+    --grad1: #89b4fa; --grad2: #cba6f7;
+    --radius: 10px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(10,10,15,0.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border); padding: 0.75rem 0;
+  }
+  nav .container { display: flex; justify-content: space-between; align-items: center; }
+  nav .logo { font-weight: 700; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; }
+  nav .logo span { color: var(--muted); font-weight: 400; }
+  nav .links { display: flex; gap: 1.5rem; list-style: none; }
+  nav .links a { color: var(--muted); font-size: 0.85rem; transition: color 0.2s; }
+  nav .links a:hover { color: var(--fg); text-decoration: none; }
+
+  /* Hero */
+  .hero { padding: 6rem 0 4rem; text-align: center; }
+  .hero h1 { font-size: 3rem; font-weight: 800; line-height: 1.15; margin-bottom: 1rem; }
+  .hero h1 .grad { background: linear-gradient(135deg, var(--grad1), var(--grad2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .hero p { font-size: 1.15rem; color: var(--muted); max-width: 600px; margin: 0 auto 2rem; }
+  .hero .btns { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 0.7rem 1.5rem; border-radius: 8px;
+    font-weight: 600; font-size: 0.9rem; transition: all 0.2s; border: none; cursor: pointer;
+  }
+  .btn-primary { background: var(--accent); color: var(--bg); }
+  .btn-primary:hover { background: #b4cdf9; text-decoration: none; }
+  .btn-outline { border: 1px solid var(--border); color: var(--fg); background: transparent; }
+  .btn-outline:hover { border-color: var(--accent); text-decoration: none; }
+
+  /* Sections */
+  section { padding: 4rem 0; }
+  section:nth-child(even) { background: var(--surface); }
+  .section-title { font-size: 1.6rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .section-sub { color: var(--muted); margin-bottom: 2.5rem; }
+
+  /* How it works */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; }
+  .step {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1.5rem; position: relative; text-align: center;
+  }
+  .step-num {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--grad1), var(--grad2));
+    color: var(--bg); font-weight: 800; font-size: 1rem;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 0.75rem;
+  }
+  .step h3 { font-size: 0.95rem; margin-bottom: 0.4rem; }
+  .step p { font-size: 0.82rem; color: var(--muted); }
+  .step code { background: rgba(137,180,250,0.1); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.8em; }
+
+  /* Leaderboard */
+  .lb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .lb-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem;
+  }
+  .lb-card.king { border-color: rgba(249,226,175,0.4); }
+  .lb-card h3 { font-size: 0.85rem; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+  .lb-score { font-size: 3rem; font-weight: 800; background: linear-gradient(135deg, var(--yellow), #fab387); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .lb-miner { font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem; }
+  .lb-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem 1rem; font-size: 0.8rem; }
+  .lb-stats .lb-stat-label { color: var(--muted); }
+  .lb-stats .lb-stat-val { text-align: right; }
+
+  /* History table */
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  th, td { padding: 0.55rem 1rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  th { font-size: 0.7rem; text-transform: uppercase; color: var(--muted); background: rgba(0,0,0,0.3); }
+  tr:hover { background: rgba(137,180,250,0.04); }
+  .merged { color: var(--green); font-weight: 600; }
+  .rejected { color: var(--red); }
+  .empty-row td { text-align: center; color: var(--muted); padding: 2rem; }
+
+  /* Model pool */
+  .pool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+  .pool-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; display: flex; gap: 1rem; align-items: center; }
+  .pool-icon { font-size: 2rem; }
+  .pool-info h4 { font-size: 0.95rem; }
+  .pool-info p { font-size: 0.8rem; color: var(--muted); }
+
+  /* Results */
+  .results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+  .result-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; text-align: center; }
+  .result-card .big { font-size: 2rem; font-weight: 800; }
+  .result-card .big.green { color: var(--green); }
+  .result-card .label { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+
+  /* FAQ */
+  .faq-item { border-bottom: 1px solid var(--border); padding: 1.25rem 0; }
+  .faq-item h3 { font-size: 1rem; margin-bottom: 0.4rem; cursor: pointer; }
+  .faq-item p { font-size: 0.9rem; color: var(--muted); }
+
+  /* Footer */
+  footer { padding: 3rem 0; border-top: 1px solid var(--border); text-align: center; font-size: 0.8rem; color: var(--muted); }
+  footer .links { display: flex; gap: 1.5rem; justify-content: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  .badge { display: inline-block; background: rgba(137,180,250,0.1); border: 1px solid rgba(137,180,250,0.3); border-radius: 20px; padding: 0.25rem 0.75rem; font-size: 0.75rem; color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 2rem; }
+    nav .links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="container">
+    <a href="#" class="logo" style="text-decoration:none;">&#x1F500; TinyRouter <span>| Gittensor</span></a>
+    <ul class="links">
+      <li><a href="#how">How</a></li>
+      <li><a href="#leaderboard">Leaderboard</a></li>
+      <li><a href="#pool">Pool</a></li>
+      <li><a href="#results">Results</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <h1>Train a <span class="grad">Routing Brain</span><br>Earn TAO</h1>
+    <p>TinyRouter is a routing accuracy competition on Gittensor. Train a tiny coordinator head that decides which LLM to call for any question. Beat the current best accuracy — your PR gets merged, you earn TAO.</p>
+    <div class="btns">
+      <a href="#how" class="btn btn-primary">Start Competing</a>
+      <a href="https://github.com/James-CUDA/Gittensor-TinyRouter" class="btn btn-outline">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section id="how">
+  <div class="container">
+    <h2 class="section-title">How it works</h2>
+    <p class="section-sub">Four steps from training to earning.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Train</h3>
+        <p>Run CMA-ES on your GPU to evolve a routing head. <code>python -m trinity.train --benchmark math500</code></p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Pack</h3>
+        <p>Extract your head weights + SVF scales. <code>python scripts/pack_submission.py --run-dir ... --miner-name you</code></p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Submit</h3>
+        <p>Open a PR with your head_weights.npy + receipt. One submission per week.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <h3>Earn</h3>
+        <p>If your accuracy beats the current best, your PR is merged and you earn TAO via Gittensor.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Leaderboard -->
+<section id="leaderboard">
+  <div class="container">
+    <h2 class="section-title">&#x1F451; Leaderboard</h2>
+    <p class="section-sub">King of the hill. Beat the current best to claim the crown.</p>
+
+    <div class="lb-grid" id="lb-kings"></div>
+
+    <h3 style="margin-bottom:0.75rem;">Submission History</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Miner</th><th>Gen</th><th>Benchmark</th><th>Score</th><th>PR</th><th>Result</th>
+        </tr></thead>
+        <tbody id="lb-history"></tbody>
+      </table>
+    </div>
+    <p style="font-size:0.75rem;color:var(--muted);margin-top:0.75rem;">
+      Scores computed on an encrypted hidden benchmark (never revealed). &nbsp;|&nbsp;
+      <a href="leaderboard.json">Raw data</a>
+    </p>
+  </div>
+</section>
+
+<!-- Model Pool -->
+<section id="pool">
+  <div class="container">
+    <h2 class="section-title">Model Pool</h2>
+    <p class="section-sub">All miners route to the same three models — fair comparison.</p>
+    <div class="pool-grid">
+      <div class="pool-card">
+        <div class="pool-icon">&#x1F9E0;</div>
+        <div class="pool-info">
+          <h4>deepseek-v4-pro</h4>
+          <p>Knowledge specialist — dominates MMLU at 92.2%</p>
+        </div>
+      </div>
+      <div class="pool-card">
+        <div class="pool-icon">&#x1F522;</div>
+        <div class="pool-info">
+          <h4>glm-5p2</h4>
+          <p>Math specialist — best math500 at 79.4%</p>
+        </div>
+      </div>
+      <div class="pool-card">
+        <div class="pool-icon">&#x1F310;</div>
+        <div class="pool-info">
+          <h4>kimi-k2p6</h4>
+          <p>General purpose — broad capability across tasks</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Results -->
+<section id="results">
+  <div class="container">
+    <h2 class="section-title">Results</h2>
+    <p class="section-sub">TinyRouter beats every single model on average — by routing each task to the right specialist.</p>
+    <div class="results-grid">
+      <div class="result-card">
+        <div class="big green">0.858</div>
+        <div class="label">TinyRouter Average (math + MMLU)</div>
+      </div>
+      <div class="result-card">
+        <div class="big">0.835</div>
+        <div class="label">Best Single Model (deepseek)</div>
+      </div>
+      <div class="result-card">
+        <div class="big">0.833</div>
+        <div class="label">Random Routing Baseline</div>
+      </div>
+      <div class="result-card">
+        <div class="big">~$62</div>
+        <div class="label">Total API Spend (all experiments)</div>
+      </div>
+    </div>
+    <p style="font-size:0.8rem;color:var(--muted);margin-top:1rem;text-align:center;">
+      Rigorous eval: 120 held-out questions per benchmark. Single-model baselines averaged over 3 runs. <a href="https://arxiv.org/abs/2512.04695">TRINITY paper (ICLR 2026)</a>
+    </p>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq">
+  <div class="container">
+    <h2 class="section-title">FAQ</h2>
+    <div class="faq-item">
+      <h3>What does it cost to compete?</h3>
+      <p>~$25-65 in Fireworks API credits per training run. You also need a GPU (T4 ~$0.20/hr) or CPU (free, slower).</p>
+    </div>
+    <div class="faq-item">
+      <h3>How is my head evaluated?</h3>
+      <p>Your head is tested against 200 hidden questions with pre-cached model answers (70% weight), plus 20 live multi-turn questions with real API calls (15% weight), plus efficiency and novelty scores.</p>
+    </div>
+    <div class="faq-item">
+      <h3>Can I see the hidden benchmark?</h3>
+      <p>No. The benchmark is encrypted and stored outside the repo. It is never revealed to miners — this prevents overfitting and keeps the competition fair.</p>
+    </div>
+    <div class="faq-item">
+      <h3>What if I lose?</h3>
+      <p>Your PR is closed with your composite score and the current best shown. You do NOT get component breakdowns (hidden accuracy, live accuracy, etc.) — this prevents benchmark probing. You can retrain and submit again next week.</p>
+    </div>
+    <div class="faq-item">
+      <h3>Can anyone cheat?</h3>
+      <p>Every submission passes 8 automated anti-cheat gates before evaluation: rate limiting, weight validation, duplicate detection (cosine similarity), receipt cross-validation, and more. Fabricated receipts and copied heads are rejected automatically.</p>
+    </div>
+    <div class="faq-item">
+      <h3>How does Gittensor pay me?</h3>
+      <p>When your routing head PR is merged, Gittensor validators (Subnet 74 on Bittensor) detect the merged PR and allocate TAO rewards proportional to your contribution.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="links">
+      <a href="https://github.com/James-CUDA/Gittensor-TinyRouter">GitHub</a>
+      <a href="SUBMITTING.md">Submission Guide</a>
+      <a href="CONTRIBUTING.md">Contributing</a>
+      <a href="ROADMAP.md">Roadmap</a>
+      <a href="leaderboard.json">Leaderboard JSON</a>
+    </div>
+    <p>
+      <span class="badge">Gittensor Subnet 74</span>
+      &nbsp;
+      <span class="badge">TRINITY · ICLR 2026</span>
+    </p>
+    <p style="margin-top:0.75rem;">TinyRouter — an open-source replication of TRINITY: An Evolved LLM Coordinator</p>
+  </div>
+</footer>
+
+<script>
+(async function() {
+  try {
+    const resp = await fetch('leaderboard.json');
+    const data = await resp.json();
+    renderLeaderboard(data);
+  } catch (e) {
+    document.getElementById('lb-kings').innerHTML =
+      '<p style="color:var(--muted);">Leaderboard data not yet available.</p>';
+  }
+})();
+
+function renderLeaderboard(data) {
+  const benches = data.benchmarks || {};
+  const kingsDiv = document.getElementById('lb-kings');
+  const historyBody = document.getElementById('lb-history');
+  let allHistory = [];
+
+  for (const [name, b] of Object.entries(benches)) {
+    const best = b.best_score || 0;
+    const isKing = b.best_miner && b.best_score > (b.best_single_model || 0);
+    const headroom = (b.oracle_ceiling || 0) - (b.best_single_model || 0);
+
+    kingsDiv.innerHTML += `
+      <div class="lb-card${isKing ? ' king' : ''}">
+        <h3>${name} ${isKing ? '&#x1F451; CURRENT KING' : ''}</h3>
+        <div class="lb-score">${(best * 100).toFixed(1)}%</div>
+        <div class="lb-miner">
+          ${b.best_miner
+            ? `King: <strong>${b.best_miner}</strong> gen ${b.best_generation}`
+            : '<em>No submissions yet — be the first</em>'}
+        </div>
+        <div class="lb-stats">
+          <span class="lb-stat-label">Best single model</span><span class="lb-stat-val">${(b.best_single_model * 100).toFixed(1)}%</span>
+          <span class="lb-stat-label">Random routing</span><span class="lb-stat-val">${(b.baseline_random * 100).toFixed(1)}%</span>
+          <span class="lb-stat-label">Oracle ceiling</span><span class="lb-stat-val">${(b.oracle_ceiling * 100).toFixed(1)}%</span>
+          <span class="lb-stat-label">Remaining headroom</span><span class="lb-stat-val">${(headroom * 100).toFixed(1)}%</span>
+          <span class="lb-stat-label">Submissions</span><span class="lb-stat-val">${(b.history || []).length}</span>
+        </div>
+      </div>`;
+
+    for (const h of (b.history || [])) {
+      allHistory.push({ ...h, benchmark: name });
+    }
+  }
+
+  allHistory.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+  if (allHistory.length === 0) {
+    historyBody.innerHTML =
+      '<tr class="empty-row"><td colspan="6">No submissions yet — train a head and open a PR to be the first</td></tr>';
+  } else {
+    historyBody.innerHTML = allHistory.map(h => `
+      <tr>
+        <td><strong>${h.miner}</strong></td>
+        <td>${h.generation}</td>
+        <td>${h.benchmark}</td>
+        <td>${(h.score * 100).toFixed(1)}%</td>
+        <td>${h.pr ? '#' + h.pr : '—'}</td>
+        <td class="${h.merged ? 'merged' : 'rejected'}">${h.merged ? 'MERGED' : 'rejected'}</td>
+      </tr>`).join('');
+  }
+}
+</script>
+
+</body>
+</html>
