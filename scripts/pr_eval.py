@@ -365,7 +365,7 @@ async def _evaluate_live(
 ) -> Tuple[float, float]:
     """Run full multi-turn eval with real API calls. Returns (accuracy, avg_turns)."""
     import httpx
-    from trinity.orchestration.reward import score_text
+    from trinity.orchestration.reward import score
     from trinity.orchestration.session import run_trajectory
     from trinity.types import Task
 
@@ -394,7 +394,7 @@ async def _evaluate_live(
             total_turns += max_turns
             continue
         traj = result
-        if score_text(tasks[i].benchmark, traj.final_answer, tasks[i].answer) > 0.0:
+        if score(traj) > 0.0:
             correct += 1
         total_turns += traj.n_turns
 
