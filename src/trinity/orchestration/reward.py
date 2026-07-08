@@ -456,9 +456,14 @@ def extract_choice_letter(text: str) -> str | None:
     if not text:
         return None
     for pat in _CHOICE_PATTERNS:
-        m = pat.search(text)
-        if m:
-            return m.group(1).upper()
+        # Take the LAST match of each pattern: the model may discuss or revise a
+        # choice before committing ("the answer is A ... on reflection, C"), so
+        # the final occurrence is the committed answer. This mirrors the "final
+        # answers usually come last" contract also honoured by extract_boxed and
+        # trinity.roles.verifier.parse_verdict.
+        matches = list(pat.finditer(text))
+        if matches:
+            return matches[-1].group(1).upper()
     # Fallback (P2 review fix): only trust the LAST non-empty line, and only when
     # it is essentially just the letter (e.g. "B", "(C)", "D."). This avoids the
     # English article "A" in prose like "A nice approach" being read as a choice.
