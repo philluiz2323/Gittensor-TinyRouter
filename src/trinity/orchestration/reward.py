@@ -46,6 +46,7 @@ from trinity.types import Role, Task, Trajectory
 __all__ = [
     "score",
     "score_text",
+    "committed_answer",
     "has_answer",
     "extract_boxed",
     "extract_last_number",
@@ -94,6 +95,17 @@ def score(traj: Trajectory) -> float:
     ref = traj.task.answer
     candidate = _committed_answer(benchmark, traj)
     return score_text(benchmark, candidate, ref)
+
+
+def committed_answer(benchmark: str, traj: Trajectory) -> str:
+    """Public alias of :func:`_committed_answer`.
+
+    Exposed so a benchmark adapter can score a full trajectory through its own
+    ``score_output`` (picking the committed answer with the same multi-turn rule
+    the evaluator uses) instead of re-implementing the selection. Keeps the
+    routed (TRINITY / random) and single-model scoring paths consistent.
+    """
+    return _committed_answer(benchmark, traj)
 
 
 def _committed_answer(benchmark: str, traj: Trajectory) -> str:

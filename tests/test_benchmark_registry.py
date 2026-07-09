@@ -63,8 +63,6 @@ def test_load_tasks_deterministic_and_capped():
     assert [t.task_id for t in a] == [t.task_id for t in b]
     for t in a:
         assert t.benchmark == "math500"
-        # build_prompt returns exactly what the pool model receives.
-        assert adapter.build_prompt(t) == t.prompt
 
 
 @pytest.mark.parametrize("name", list(_SCORING_CASES))
@@ -116,6 +114,78 @@ def test_delegating_adapter_rejects_unknown_benchmark():
 def test_register_duplicate_name_raises():
     with pytest.raises(ValueError):
         register_adapter("math500", DelegatingBenchmarkAdapter("math500"))
+
+
+def test_score_trajectory_matches_reward_score_for_delegating_adapter():
+    """The routed path (score_trajectory) must equal the legacy reward.score."""
+    from trinity.orchestration import reward
+    from trinity.types import Task, Trajectory
+
+    adapter = get_adapter("math500")
+    task = Task(task_id="t", benchmark="math500", prompt="2+2?", answer="4")
+    traj = Trajectory(task=task, final_answer="The answer is \\boxed{4}.")
+    assert adapter.score_trajectory(traj) == reward.score(traj) == 1.0
+
+    traj_wrong = Trajectory(task=task, final_answer="The answer is \\boxed{9}.")
+    assert adapter.score_trajectory(traj_wrong) == reward.score(traj_wrong) == 0.0
+
+
+def test_score_trajectory_honors_custom_score_output():
+    """A custom score_output is used on the multi-turn path, not just single-turn."""
+    from trinity.types import Task, Trajectory
+
+    class _AlwaysZero(DelegatingBenchmarkAdapter):
+        def score_output(self, output, reference):
+            return 0.0  # deliberately disagrees with the real scorer
+
+    adapter = _AlwaysZero("math500")
+    task = Task(task_id="t", benchmark="math500", prompt="2+2?", answer="4")
+    # final_answer is objectively correct; the custom scorer must still win.
+    traj = Trajectory(task=task, final_answer="The answer is \\boxed{4}.")
+    assert adapter.score_trajectory(traj) == 0.0
+
+
+def test_build_prompt_drives_routed_trajectory():
+    """build_prompt is the real prompt seam: run_trajectory must present it to
+    both the coordinator (policy) and the pool model, not raw task.prompt."""
+    import asyncio
+
+    from trinity.orchestration.session import run_trajectory
+    from trinity.types import Role, Task
+
+    marker = "ZZ_UNIQUE_PROMPT_MARKER_ZZ"
+
+    class _MarkerAdapter(DelegatingBenchmarkAdapter):
+        def build_prompt(self, task):
+            return f"{marker} :: {task.prompt}"
+
+    seen = {"policy_text": None, "pool_messages": None}
+
+    class _StubPolicy:
+        def decide(self, transcript_text, *, sample, rng=None):
+            seen["policy_text"] = transcript_text
+            return 0, Role.WORKER
+
+    class _Res:
+        text = "\\boxed{4}"
+        prompt_tokens = 0
+        completion_tokens = 0
+
+    class _StubPool:
+        async def chat(self, model, messages, **kwargs):
+            seen["pool_messages"] = messages
+            return _Res()
+
+    adapter = _MarkerAdapter("math500")
+    task = Task(task_id="t", benchmark="math500", prompt="What is 2+2?", answer="4")
+    asyncio.run(
+        run_trajectory(task, _StubPolicy(), _StubPool(), ["m0"],
+                       max_turns=1, adapter=adapter)
+    )
+    # The coordinator saw the adapter-rendered query...
+    assert marker in seen["policy_text"]
+    # ...and so did the pool model (marker appears somewhere in the messages).
+    assert marker in "".join(m.get("content", "") for m in seen["pool_messages"])
 
 
 def test_decorator_registration_and_registry_isolation():

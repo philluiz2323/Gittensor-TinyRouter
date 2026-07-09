@@ -34,7 +34,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from trinity.types import Task
+    from trinity.types import Task, Trajectory
 
 
 class TaskType(str, Enum):
@@ -106,6 +106,23 @@ class BenchmarkAdapter(ABC):
         round-trippable to the extent the frozen protocol needs (id, prompt,
         reference, type, meta) and must contain only JSON-native values.
         """
+
+    def score_trajectory(self, traj: "Trajectory") -> float:
+        """Return the binary reward for a full multi-turn trajectory.
+
+        This is the entry point the routed evaluation path (TRINITY and the
+        random-routing baseline) uses, so it must stay consistent with
+        :meth:`score_output`: the default picks the *committed answer* across
+        turns (the same most-recent-extractable-answer rule the evaluator uses)
+        and then delegates to :meth:`score_output`. An adapter that customises
+        ``score_output`` therefore gets that behaviour on both the single-turn
+        and multi-turn paths for free; one that needs to inspect intermediate
+        turns (e.g. a patch adapter) overrides this method.
+        """
+        from trinity.orchestration.reward import committed_answer
+
+        candidate = committed_answer(self.name, traj)
+        return self.score_output(candidate, traj.task.answer)
 
     def cache_baselines(self, task: "Task", pool: Any) -> dict[str, Any] | None:
         """Optionally pre-compute per-model baseline answers/scores for ``task``.
