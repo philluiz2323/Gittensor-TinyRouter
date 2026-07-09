@@ -320,12 +320,28 @@ def _validate_receipt(receipt: dict) -> Optional[str]:
     if claimed_gens > 0 and abs(claimed_gens - len(history)) > 5:
         return f"receipt_generations_mismatch: claimed {claimed_gens}, history has {len(history)}"
 
-    # Best fitness should be close to the max in history
+    # Best fitness is the best CANDIDATE ever evaluated (es.best()); cross-check
+    # it against the per-generation PEAK series (gen_max_fitness / max_fitness),
+    # NOT the population MEANS in `values`. With m_cma binary-reward tasks per
+    # candidate, fitness is granular and the population best sits well above any
+    # generation mean, so comparing best_fitness to max(values) rejects honest
+    # receipts. The shape checks above stay on the means, where they belong.
     best_fitness = receipt.get("best_fitness", 0.0)
     if best_fitness > 0.0:
-        max_in_history = max(values)
-        if abs(best_fitness - max_in_history) > 0.1:
-            return f"receipt_best_fitness_mismatch: claimed {best_fitness:.4f}, history max {max_in_history:.4f}"
+        peaks = []
+        for entry in history:
+            if isinstance(entry, dict):
+                p = entry.get("gen_max_fitness", entry.get("max_fitness", entry.get("best_fitness")))
+            elif isinstance(entry, (int, float)):
+                p = entry
+            else:
+                continue
+            if p is not None:
+                peaks.append(float(p))
+        if peaks:
+            peak_max = max(peaks)
+            if abs(best_fitness - peak_max) > 0.1:
+                return f"receipt_best_fitness_mismatch: claimed {best_fitness:.4f}, history peak {peak_max:.4f}"
 
     return None
 
