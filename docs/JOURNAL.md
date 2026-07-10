@@ -18,6 +18,29 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — Every submission receipt claimed `seed: 0`  #mistake #decision
+
+**Context:** closing the loose end from the `SepCMAES` seed fix (#38) — "a 'plausible CMA-ES
+fitness curve' is only re-derivable now that the default seed is honoured" (issue #109).
+**Expected:** `trinity.train --seed 7` then `pack_submission.py` yields `receipt.json` with
+`"seed": 7`.
+**Actual:** `"seed": 0`, for every run at every seed.
+**Root cause:** `pack_submission.build_receipt` read `summary.get("seed", 0)`, but `train.py`
+never wrote a `seed` key — its summary carried only `{benchmark, pool, n_total, popsize, m_cma,
+generations, best_fitness, run_dir}`. The `.get` default did all the work, silently.
+**Fix / decision:** `train.py` now records `"seed"` via a new pure `build_summary()` helper (the
+async `train()` needs a GPU pool, so the artifact schema had no offline test seam; the helper
+gives it one). `build_receipt` resolves the seed through `_resolve_seed()`, which records
+`null` — not `0` — when the key is absent. `[OUR CHOICE]` `0` is the wrong sentinel for "not
+recorded": it is indistinguishable from an honest `--seed 0` run, and per #38 pycma historically
+read seed `0` as *seed from the wall clock*. A packer that cannot name the seed should say so.
+`SUBMITTING.md` already advertised `receipt.json` as carrying the seed, so this restores a
+documented contract rather than inventing one.
+**Follow-up:** `pr_eval._validate_receipt` still does not *use* `receipt["seed"]`. Now that the
+field is trustworthy, Gate 4 could re-derive a claimed fitness curve from the seed instead of
+only checking its shape (monotonicity, start value, generation count). That would turn a
+plausibility heuristic into an actual reproduction check.
+
 ## 2026-07-10 — Cost-ledger append reset to genesis after any chain break  #mistake #decision
 **Context:** follow-up audit of the unified cost-ledger module from #87/#88.
 Concurrent OpenRouter chats (`max_concurrency` default 8) append to the same
