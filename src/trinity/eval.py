@@ -18,6 +18,7 @@ import json
 import random
 from pathlib import Path
 from statistics import mean
+from typing import Any, Mapping
 
 import numpy as np
 import yaml
@@ -203,6 +204,36 @@ async def _score_single_model(tasks, pool, model, adapter, *, max_tokens, reason
     return _reduce_scores(scores, label=f"single::{model}")
 
 
+def resolve_session_run_kwargs(args, session: Mapping[str, Any]) -> dict[str, Any]:
+    """Build ``run_trajectory`` kwargs for eval from CLI args + the ``session:`` block.
+
+    Mirrors ``trinity.train`` so the coordinator is EVALUATED under the same
+    protocol it was TRAINED under: an explicit ``--max-turns`` overrides the
+    config, which overrides the default ``K=5``; ``verifier_requires_prior_worker``
+    comes from the config (default ``True``). Without this, a ``session:`` block
+    that changed the turn budget or the verifier gate at train time is silently
+    ignored at eval — the reported R1/R2/R4 then describe an off-distribution
+    policy, and the budget-matched single-model baselines (``max_turns`` x
+    ``max_tokens``) are sized against the wrong ``K``.
+
+    Args:
+        args: Parsed CLI args (uses ``max_turns``, ``max_tokens``, ``reasoning``).
+            ``max_turns`` of ``0``/``None`` means "not given" and defers to config.
+        session: The parsed ``session:`` mapping from the config (``{}`` if absent).
+
+    Returns:
+        Keyword args for :func:`trinity.orchestration.session.run_trajectory`,
+        including the resolved ``max_turns`` and ``verifier_requires_prior_worker``.
+    """
+    max_turns = args.max_turns or session.get("max_turns", 5)
+    return dict(
+        max_turns=max_turns,
+        max_tokens=args.max_tokens,
+        reasoning=args.reasoning,
+        verifier_requires_prior_worker=session.get("verifier_requires_prior_worker", True),
+    )
+
+
 async def evaluate(args) -> dict:
     pool = OpenRouterPool(args.models)
     pool_models = list(pool.models)
@@ -213,16 +244,22 @@ async def evaluate(args) -> dict:
     adapter = get_adapter(args.benchmark)
     tasks = adapter.load_tasks("test", max_items=args.max_items, seed=args.seed)
     print(f"[eval] benchmark={args.benchmark}  {len(tasks)} test tasks  pool={pool_models}")
-    run_kwargs = dict(max_turns=args.max_turns, max_tokens=args.max_tokens, reasoning=args.reasoning)
+
+    # Read the SAME `session:` block train.py uses so eval runs the trained
+    # protocol (turn budget K, verifier gate), not just CLI defaults. Loaded once
+    # and reused for the `coordinator:` block below.
+    full_cfg = yaml.safe_load(Path(args.config).read_text())
+    run_kwargs = resolve_session_run_kwargs(args, full_cfg.get("session", {}))
+    eval_max_turns = run_kwargs["max_turns"]
 
     # SPEC §1.3.4: the single-model baselines must be BUDGET-MATCHED to TRINITY, or
     # R1/R2 ("TRINITY beats the best single model") is decided by token budget
     # rather than by routing. TRINITY may spend `max_tokens` on each of `max_turns`
     # turns, so a single model gets that same total in its one turn -- 5 x 4096 =
     # 20,480 at the defaults, which is the paper's 5x protocol.
-    single_max_tokens = single_model_budget(args.max_tokens, args.max_turns)
+    single_max_tokens = single_model_budget(args.max_tokens, eval_max_turns)
     print(f"[eval] budget-matched baselines: single-model max_tokens="
-          f"{single_max_tokens} ({args.max_turns}x {args.max_tokens})")
+          f"{single_max_tokens} ({eval_max_turns}x {args.max_tokens})")
 
     results: dict[str, float] = {}
 
@@ -242,7 +279,7 @@ async def evaluate(args) -> dict:
             print(f"  single  {m:20s} = {s:.4f}")
 
     # --- TRINITY trained coordinator (argmax) ---
-    cfg = yaml.safe_load(Path(args.config).read_text())["coordinator"]
+    cfg = full_cfg["coordinator"]
     print("[eval] building coordinator on GPU...")
     policy, spec = CoordinatorPolicy.build(
         model_name=cfg["encoder_model"], device=cfg.get("device", "cuda:0"),
@@ -303,7 +340,8 @@ def main() -> None:
     ap.add_argument("--max-items", type=int, default=100, dest="max_items")
     ap.add_argument("--single-reps", type=int, default=1, dest="single_reps",
                     help="average each single-model baseline over K runs (cuts nondeterminism noise)")
-    ap.add_argument("--max-turns", type=int, default=5, dest="max_turns")
+    ap.add_argument("--max-turns", type=int, default=0, dest="max_turns",
+                    help="override K; 0 (default) defers to config session.max_turns (else 5)")
     ap.add_argument("--max-tokens", type=int, default=4096, dest="max_tokens")
     ap.add_argument("--reasoning", default="minimal")
     ap.add_argument("--seed", type=int, default=REPRODUCIBILITY_SEED,

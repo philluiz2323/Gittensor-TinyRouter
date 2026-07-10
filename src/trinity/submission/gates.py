@@ -106,6 +106,8 @@ def check_rate_limit(
     miner_name: str,
     benchmark: str,
     leaderboard: dict[str, Any],
+    *,
+    current_pr: int | None = None,
 ) -> Optional[str]:
     bench_entry = leaderboard.get("benchmarks", {}).get(benchmark, {})
     entries = rate_limit_entries(bench_entry)
@@ -115,8 +117,16 @@ def check_rate_limit(
         ts = parse_utc_timestamp(entry.get("timestamp", ""))
         if ts is None:
             continue
-        if entry.get("miner") == miner_name and ts > cutoff:
-            recent += 1
+        if entry.get("miner") != miner_name or ts <= cutoff:
+            continue
+        # Re-evaluating the SAME PR is not a second submission. The attempt was
+        # recorded when Gate 1 first passed; if the eval was then re-run (a CI
+        # retry, or a transient GPU/API failure during live scoring), that same
+        # attempt must not count against the miner and self-reject their PR.
+        # A distinct PR still counts, preserving the anti-probe intent.
+        if current_pr is not None and entry.get("pr") == current_pr:
+            continue
+        recent += 1
     if recent >= RATE_LIMIT_MAX_SUBMISSIONS:
         return (
             f"rate_limited: {recent} submission(s) in the last "
@@ -308,7 +318,9 @@ def validate_ledger_receipt_cost(
 
 
 def _gate_rate_limit(pack: SubmissionPack, ctx: PreflightContext) -> Optional[str]:
-    return check_rate_limit(pack.miner, ctx.benchmark, ctx.leaderboard)
+    return check_rate_limit(
+        pack.miner, ctx.benchmark, ctx.leaderboard, current_pr=ctx.pr_number,
+    )
 
 
 def _gate_weights(pack: SubmissionPack, ctx: PreflightContext) -> Optional[str]:

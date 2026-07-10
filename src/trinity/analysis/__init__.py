@@ -14,6 +14,12 @@ from trinity.analysis.agreement import (
     summarize,
     to_oracle_matrix,
 )
+from trinity.analysis.complementarity import (
+    ComplementaritySummary,
+    PerModelComplementarity,
+    analyze,
+    analyze_tensor,
+)
 
 __all__ = [
     "AgreementSummary",
@@ -23,4 +29,8 @@ __all__ = [
     "grade_items",
     "summarize",
     "to_oracle_matrix",
+    "ComplementaritySummary",
+    "PerModelComplementarity",
+    "analyze",
+    "analyze_tensor",
 ]
