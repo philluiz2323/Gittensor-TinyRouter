@@ -24,7 +24,8 @@ from .benchmarks import (
     MmluAdapter,
     register_builtin_adapters,
 )
-from .builtin import DelegatingBenchmarkAdapter
+from .builtin import DelegatingBenchmarkAdapter, register_livecodebench_v6_adapter
+from .livecodebench import LiveCodeBenchV6Adapter
 from .mmlu_pro import MmluProAdapter, register_mmlu_pro_adapter
 from .registry import (
     available_adapters,
@@ -50,6 +51,7 @@ __all__ = [
     "supports_execution",
     "requires_execution",
     "DelegatingBenchmarkAdapter",
+    "LiveCodeBenchV6Adapter",
     "Math500Adapter",
     "MmluAdapter",
     "GpqaAdapter",
@@ -70,5 +72,6 @@ __all__ = [
 # Register the built-in benchmarks on import so `get_adapter("math500")` works
 # without the caller having to bootstrap the registry.
 register_builtin_adapters()
+register_livecodebench_v6_adapter()
 register_swebench_adapter()
 register_mmlu_pro_adapter()

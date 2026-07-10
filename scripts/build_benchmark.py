@@ -77,8 +77,12 @@ def _sample_pool(benchmark: str, counts: Dict[str, int]) -> List[Any]:
     return protocol.sample_pool(load_tasks, benchmark, counts, seed=_BENCHMARK_SEED)
 
 
-async def _cache_answers(items: List[Dict], pool, pool_models: List[str]) -> None:
-    """Call each model ONCE per question (temp=0) and cache the answer.
+async def _cache_answers(
+    task_item_pairs: List[tuple[Any, Dict]],
+    pool,
+    pool_models: List[str],
+) -> None:
+    """Call each model once per task (temp=0) and cache the answer.
 
     The cached answers back the 70%-weighted single-turn score, so they must be
     produced with the SAME single-turn invocation the router is trained and
@@ -91,18 +95,22 @@ async def _cache_answers(items: List[Dict], pool, pool_models: List[str]) -> Non
     """
     import httpx
 
+    from trinity.adapters import get_adapter
     from trinity.roles.prompts import build_messages
     from trinity.types import Role
 
     async with httpx.AsyncClient() as client:
-        for item in items:
+        for task, item in task_item_pairs:
+            benchmark = getattr(task, "benchmark", None) or item.get("benchmark", "math500")
+            adapter = get_adapter(str(benchmark))
+            prompt = adapter.build_prompt(task)
             for model_name in pool_models:
                 if item["model_answers"].get(model_name):
                     continue  # already cached
                 try:
                     res = await pool.chat(
                         model_name,
-                        build_messages(Role.WORKER, item["question_text"], []),
+                        build_messages(Role.WORKER, prompt, []),
                         max_tokens=4096, temperature=0.0, top_p=1.0,
                         client=client,
                     )
@@ -147,6 +155,10 @@ async def build_benchmark(benchmark: str, output_dir: str, password: str) -> str
     bench_dir = Path(output_dir) / benchmark
     bench_dir.mkdir(parents=True, exist_ok=True)
 
+    from trinity.adapters import get_adapter
+
+    get_adapter(benchmark)  # fail fast if the benchmark has no adapter
+
     print(f"Building hidden benchmark for: {benchmark}")
     print(f"  Seed: {_BENCHMARK_SEED} (SEALED — never change)")
     print(f"  Output: {bench_dir}")
@@ -165,11 +177,15 @@ async def build_benchmark(benchmark: str, output_dir: str, password: str) -> str
     # Convert to items with a stable, protocol-defined id. A pool-global index
     # feeds the deterministic id fallback so ids never collide across splits.
     items_by_split: Dict[str, List[Dict]] = {}
+    cache_pairs: List[tuple[Any, Dict]] = []
     idx = 0
     for name in protocol.SPLIT_ORDER:
         built = []
         for t in task_splits[name]:
-            built.append(_task_to_item(t, idx))
+            item = _task_to_item(t, idx)
+            built.append(item)
+            if name != "live":
+                cache_pairs.append((t, item))
             idx += 1
         items_by_split[name] = built
 
@@ -193,13 +209,13 @@ async def build_benchmark(benchmark: str, output_dir: str, password: str) -> str
     pool_models = list(pool.models.keys())
 
     all_cacheable = eval_items + audit_items
-    total_calls = len(all_cacheable) * len(pool_models)
+    total_calls = len(cache_pairs) * len(pool_models)
     est_cost = total_calls * 0.003
-    print(f"\nPre-computing cached answers: {len(all_cacheable)} questions × "
+    print(f"\nPre-computing cached answers: {len(cache_pairs)} questions × "
           f"{len(pool_models)} models = {total_calls} API calls")
     print(f"Estimated cost: ~${est_cost:.2f}")
 
-    await _cache_answers(all_cacheable, pool, pool_models)
+    await _cache_answers(cache_pairs, pool, pool_models)
     print("  Caching complete.")
 
     # Save encrypted files
@@ -257,8 +273,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Build the hidden benchmark for the TinyRouter accuracy competition"
     )
+    from trinity.adapters import available_adapters
+
     ap.add_argument("--benchmark", required=True,
-                    help="Benchmark name (math500 or mmlu)")
+                    choices=available_adapters(),
+                    help="Registered benchmark name (via adapter registry)")
     ap.add_argument("--output-dir", default=None, dest="output_dir",
                     help="Output directory (default: $TINYROUTER_BENCHMARK_DIR or "
                          "../tinyrouter-benchmark/)")
