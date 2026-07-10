@@ -205,7 +205,12 @@ class OpenRouterPool:
             resp.raise_for_status()
             data = resp.json()
             choice = data["choices"][0]
-            usage = data.get("usage", {})
+            # `data.get("usage", {})` only defaults an ABSENT key. OpenAI-compatible
+            # providers also send `"usage": null` (some providers, and 200s with an
+            # empty completion), which would make `usage.get(...)` raise on `None` --
+            # crashing an otherwise-successful call. `or {}` covers absent and null,
+            # matching how `_message_text` already guards `content: null`.
+            usage = data.get("usage") or {}
             pt = usage.get("prompt_tokens", 0)
             ct = usage.get("completion_tokens", 0)
             _ledger_append(payload["model"], pt, ct)
