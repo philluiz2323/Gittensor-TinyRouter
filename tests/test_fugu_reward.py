@@ -53,6 +53,23 @@ def test_dollar_amount_is_not_a_false_negative():
     assert is_correct(run, Task(task_id="d", benchmark="math500", prompt="", answer="\\$18.90")) == 1
 
 
+def test_thousands_separator_is_not_a_false_negative():
+    # Regression: a thousands-separated math answer ("2,000") must grade equal to
+    # the same value without the separator. normalize_math_answer kept the comma
+    # while extract_last_number stripped it, so the two halves of the grader
+    # disagreed and any answer >= 1000 written with grouping scored 0.
+    from trinity.orchestration import reward as R
+
+    assert R.math_equal("2,000", "2000") is True
+    assert R.math_equal("1,000,000", "1000000") is True
+    assert R.score_text("math500", "Thus the answer is \\boxed{2,000}.", "2000") == 1.0
+    assert R.score_text("math500", "The answer is 2000.", "2,000") == 1.0
+    # A short comma-separated list is not a number and must stay unequal.
+    assert R.math_equal("1,2,3", "123") is False
+    run = _run("So the final count is \\boxed{12,345}.")
+    assert is_correct(run, Task(task_id="t", benchmark="math500", prompt="", answer="12345")) == 1
+
+
 def test_no_false_positive_from_prose_letter():
     # "A nice approach" must NOT be read as choice 'A' (the JOURNAL P2 bug).
     run = _run("A nice approach to this question.")

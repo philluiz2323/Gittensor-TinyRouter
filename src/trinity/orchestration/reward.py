@@ -331,6 +331,12 @@ def normalize_math_answer(ans: str | None) -> str:
     s = re.sub(r"\\d?frac\s*(\d)\s*(\d)", r"\1/\2", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
     s = re.sub(r"\s+", "", s)
+    # Strip digit-grouping commas ("2,000" -> "2000", "1,000,000" -> "1000000") so
+    # a thousands-separated answer is not a false negative. Only a comma between a
+    # digit and a group of exactly three digits at a non-digit boundary is removed,
+    # leaving list-like "1,2,3" untouched. Matches extract_last_number, which
+    # already drops these commas.
+    s = re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)
     s = s.lower()
     # Canonicalize a pure integer ratio a/b.
     m = re.fullmatch(r"\(?(-?\d+)\)?/\(?(-?\d+)\)?", s)
