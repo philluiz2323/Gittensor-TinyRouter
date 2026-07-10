@@ -22,11 +22,10 @@ from statistics import mean
 import numpy as np
 import yaml
 
+from .adapters import get_adapter
 from .coordinator import params as P
 from .coordinator.policy import CoordinatorPolicy
 from .llm.openrouter_client import OpenRouterPool
-from .orchestration import reward as R
-from .orchestration.dataset import load_tasks
 from .orchestration.session import run_trajectory
 from .types import ROLE_ORDER, Role
 
@@ -91,7 +90,7 @@ def task_rng(seed: int, task_id: str) -> random.Random:
 
 
 async def _score_policy(
-    tasks, policy, pool, pool_models, *, sample, rng_seed: int | None = None, **run_kwargs
+    tasks, policy, pool, pool_models, *, adapter, sample, rng_seed: int | None = None, **run_kwargs
 ) -> float:
     import httpx
 
@@ -99,17 +98,19 @@ async def _score_policy(
         trajs = await asyncio.gather(
             *[
                 run_trajectory(
-                    t, policy, pool, pool_models, sample=sample, client=cli,
+                    t, policy, pool, pool_models, adapter=adapter, sample=sample, client=cli,
                     rng=None if rng_seed is None else task_rng(rng_seed, t.task_id),
                     **run_kwargs,
                 )
                 for t in tasks
             ]
         )
-    return float(mean(R.score(t) for t in trajs))
+    # Score through the adapter (not reward.score directly) so the routed path
+    # honours the same benchmark contract as the single-model baseline.
+    return float(mean(adapter.score_trajectory(t) for t in trajs))
 
 
-async def _score_single_model(tasks, pool, model, benchmark, *, max_tokens, reasoning) -> float:
+async def _score_single_model(tasks, pool, model, adapter, *, max_tokens, reasoning) -> float:
     """Baseline: ask one model directly (one Worker-style turn), score its answer."""
     import httpx
 
@@ -117,10 +118,10 @@ async def _score_single_model(tasks, pool, model, benchmark, *, max_tokens, reas
 
     async with httpx.AsyncClient() as cli:
         async def one(task):
-            msgs = build_messages(Role.WORKER, task.prompt, [])
+            msgs = build_messages(Role.WORKER, adapter.build_prompt(task), [])
             res = await pool.chat(model, msgs, max_tokens=max_tokens, temperature=0.0,
                                   reasoning=reasoning, client=cli)
-            return R.score_text(benchmark, res.text, task.answer)
+            return adapter.score_output(res.text, task.answer)
 
         scores = await asyncio.gather(*[one(t) for t in tasks])
     return float(mean(scores))
@@ -131,7 +132,10 @@ async def evaluate(args) -> dict:
     pool_models = list(pool.models)
     n_models = len(pool_models)
 
-    tasks = load_tasks(args.benchmark, "test", max_items=args.max_items, seed=args.seed)
+    # Resolve the benchmark to an adapter ONCE; the rest of the evaluator drives
+    # the adapter interface and never branches on the benchmark name (#9).
+    adapter = get_adapter(args.benchmark)
+    tasks = adapter.load_tasks("test", max_items=args.max_items, seed=args.seed)
     print(f"[eval] benchmark={args.benchmark}  {len(tasks)} test tasks  pool={pool_models}")
     run_kwargs = dict(max_turns=args.max_turns, max_tokens=args.max_tokens, reasoning=args.reasoning)
 
@@ -139,7 +143,7 @@ async def evaluate(args) -> dict:
 
     # --- single-model baselines (R1/R2) ---
     for m in pool_models:
-        reps = [await _score_single_model(tasks, pool, m, args.benchmark,
+        reps = [await _score_single_model(tasks, pool, m, adapter,
                                           max_tokens=args.max_tokens, reasoning=args.reasoning)
                 for _ in range(max(1, args.single_reps))]
         s = float(mean(reps))
@@ -162,7 +166,8 @@ async def evaluate(args) -> dict:
     )
     theta = np.load(args.theta)
     policy.configure(theta, spec)
-    s_trinity = await _score_policy(tasks, policy, pool, pool_models, sample=False, **run_kwargs)
+    s_trinity = await _score_policy(tasks, policy, pool, pool_models, adapter=adapter,
+                                    sample=False, **run_kwargs)
     results["TRINITY"] = s_trinity
     print(f"  TRINITY (trained)        = {s_trinity:.4f}")
 
@@ -175,8 +180,8 @@ async def evaluate(args) -> dict:
     for s in range(rand_seeds):
         seed_s = args.seed * 10000 + s
         rand = RandomPolicy(n_models, seed=seed_s)
-        s_r = await _score_policy(tasks, rand, pool, pool_models, sample=False,
-                                  rng_seed=seed_s, **run_kwargs)
+        s_r = await _score_policy(tasks, rand, pool, pool_models, adapter=adapter,
+                                  sample=False, rng_seed=seed_s, **run_kwargs)
         rand_scores.append(s_r)
     s_rand = float(mean(rand_scores))
     results["random_routing"] = s_rand
