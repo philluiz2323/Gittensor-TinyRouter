@@ -18,6 +18,7 @@ from trinity.adapters import (
     is_registered,
     register_adapter,
     register_builtin_adapters,
+    register_mmlu_pro_adapter,
     register_swebench_adapter,
 )
 from trinity.orchestration.dataset import SUPPORTED_BENCHMARKS
@@ -36,7 +37,8 @@ def test_builtins_registered_for_every_supported_benchmark():
         assert is_registered(name)
         assert isinstance(get_adapter(name), BenchmarkAdapter)
     # The registry exposes at least the supported benchmarks; additional adapters
-    # (e.g. the SWE-bench Verified adapter, #17) may also be registered.
+    # (e.g. the SWE-bench Verified (#17) and MMLU-Pro (#12) adapters) may also be
+    # registered.
     assert set(SUPPORTED_BENCHMARKS) <= set(available_adapters())
 
 
@@ -219,9 +221,11 @@ def test_decorator_registration_and_registry_isolation():
         assert get_adapter("unit-test-bench").score_output("x", "x") == 1.0
     finally:
         # Never leak test state into other tests: restore the real registry
-        # (both the built-in benchmarks and the SWE-bench adapter, #17).
+        # (the built-in benchmarks plus the SWE-bench (#17) and MMLU-Pro (#12)
+        # adapters).
         clear_registry()
         register_builtin_adapters()
         register_swebench_adapter()
+        register_mmlu_pro_adapter()
 
     assert set(SUPPORTED_BENCHMARKS) <= set(available_adapters())
