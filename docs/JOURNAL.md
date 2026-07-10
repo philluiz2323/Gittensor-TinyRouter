@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-11 — Audit random-routing baseline was non-reproducible (shared rng under asyncio.gather)  #mistake #finding #decision
+
+**Context:** `scripts/audit_eval.py` is the SEALED, run-once "honest, ungameable"
+number. Its random-routing baseline averages 100 seeds; each seed fans all tasks
+out through `asyncio.gather`.
+**Expected:** a fixed seed → a byte-reproducible `random_routing` score.
+**Actual:** it wasn't. `_RandomAuditPolicy` held one shared `self.rng` and every
+concurrently-gathered trajectory drew from it, so turn-2+ routing draws were
+consumed in **network-completion order**, not seed order — the exact bug
+`trinity.eval.RandomPolicy` was already fixed for (via `task_rng(seed, task_id)`),
+but the audit script kept the old shared-rng form.
+**Root cause:** `decide` used `self.rng` and ignored the per-trajectory `rng`
+`run_trajectory` passes through; the audit loop never supplied one.
+**Fix / decision:** mirror `trinity.eval` — `decide` draws from the passed `rng`
+(instance rng only as a fallback), and the loop passes `rng=task_rng(seed_s,
+t.task_id)` per trajectory. Covered by `tests/test_audit_random_routing_seed.py`.
+**Follow-up:** the audit "held-out" guarantee is soft (samples train w/ a diff seed,
+not a provably-disjoint partition) — a larger, separate change.
+
 ## 2026-07-10 — Miners had no offline path to run pr_eval gates before opening a PR  #finding #decision
 **Context:** routing-head submissions were rejected only after opening a PR, when
 ``scripts/pr_eval.py`` ran gates 1–4 embedded in an 850-line maintainer script.
