@@ -37,6 +37,22 @@ lives in ``trinity.llm.openrouter_pricing`` so ``cost_report.py``,
 **Follow-up:** wire the preflight CLI into CONTRIBUTING/SUBMITTING docs when the
 maintainer is ready to advertise it.
 
+## 2026-07-10 — A null `usage` block crashed a successful inference call  #mistake #gotcha
+**Context:** hardening `llm/openrouter_client.py` after #72 fixed the `content: null` case, to see whether the same present-but-null trap existed elsewhere in the response parsing.
+**Expected:** a 200-OK response with `"usage": null` records zero tokens and returns the completion.
+**Actual:** `usage = data.get("usage", {})` returns `None` (the `{}` default only applies to an *absent* key, not a present-null one), and the next line `usage.get("prompt_tokens", 0)` raises `AttributeError: 'NoneType' object has no attribute 'get'` — on an otherwise-successful call.
+**Root cause:** the identical `dict.get(k, default)` misuse #72 fixed for `content`, one function away, in the token-accounting path — missed because `_message_text` and the usage parse were treated as separate concerns. OpenAI-compatible providers send `"usage": null` for some backends and for 200s with an empty completion.
+**Why it is worse than the `content` case:** `_message_text` returned a wrong *value* ("None"); this *raises*. The `AttributeError` is not in the `_Retryable` set (only 429/5xx and network errors are), and `@retry(..., reraise=True)` re-raises it out of `chat`. With `eval`/`fitness` now gathering `return_exceptions=True`, that exception becomes the trajectory's result and is scored **0.0** — so a model that answered correctly is silently counted as wrong, in both eval and CMA-ES training reward.
+**Fix / decision:** `usage = data.get("usage") or {}` — covers absent and null identically, exactly mirroring the `if content is None` guard #72 added in the same file. One line; no behaviour change for a populated, empty, or absent usage block.
+**Follow-up:** `choice = data["choices"][0]` and `choice["message"]` are still index/`[]` access, so a response with no `choices` would `KeyError`. That is a genuinely malformed response (not a documented provider behaviour like `usage: null`), so I left it — a separate, weaker concern.
+
+## 2026-07-10 — Added an offline view of efficiency and composite-score tradeoffs  #finding #decision
+**Context:** contributors could see hidden/live accuracy, but the competition's 10% efficiency term still lived only inside `scripts/pr_eval.py::_compute_score`, making turn-efficiency tradeoffs hard to inspect offline.
+**Expected:** a miner can estimate the composite score and inspect turns-per-correct-answer without opening a PR or touching the hidden evaluator.
+**Actual:** there was no repo-local utility for that analysis; the formula existed only in the maintainer scorer.
+**Fix / decision:** add `src/trinity/efficiency.py` plus `scripts/efficiency_report.py` as an offline mirror of the current score formula, with per-answer efficiency summaries (`turns_per_correct`, optional calls/cost per correct) and tests that pin the implementation to `pr_eval` when importable.
+**Follow-up:** if the competition scoring formula changes, `pr_eval` and `trinity.efficiency` must be updated together so offline analysis stays aligned with the maintained scorer.
+
 ---
 
 ## 2026-07-10 — The head never read `<Head Input>`; the EOS trick was a no-op  #mistake #gotcha #repro
