@@ -77,6 +77,21 @@ seed=1: identical first population? True
 **Fix / decision:** stop forwarding the seed to pycma. Pass `np.nan` (pycma's documented "do nothing") and call `np.random.seed(self.seed)` ourselves, since numpy treats `0` as an ordinary seed. This is behavior-preserving: pycma implements an honoured `seed=k` as exactly `np.random.seed(k)`, verified by a test that reconstructs the reference stream directly from `cma.CMAEvolutionStrategy` — so every previously-working seed keeps its byte-identical stream and archived fitness curves stay reproducible. `0` simply joins them. Rejected the tempting one-liner `seed or 1`, which would silently alias seeds 0 and 1 onto one stream (pinned by `test_zero_and_one_are_not_aliased`). Seeds outside `[0, 2**32-1]` now raise instead of reaching numpy.
 **Follow-up:** the wrapper still seeds the **global** `numpy.random` state — that is unchanged from before (pycma did it too), but it means constructing a `SepCMAES` perturbs unrelated numpy randomness in the process. Isolating it behind a `np.random.Generator` / pycma's `randn` option is worth doing separately. Also relevant to the receipt gate in `pr_eval.py`: a "plausible CMA-ES fitness curve" is only re-derivable now that the default seed is honoured.
 
+## 2026-07-10 — MMLU `train` split resolved via shared split_policy  #finding #decision
+
+**Context:** `load_tasks("mmlu", "train")` silently fell back to the 2-item toy set
+because `cais/mmlu` publishes `auxiliary_train`, not `train` (issue #35).
+**Expected:** training and benchmark builds load real MMLU rows for logical `train`.
+**Actual:** `_try_load_hf` swallowed the unknown-split error; `load_split` substituted
+the toy set with no warning.
+**Root cause:** split name forwarded verbatim; no alias table on the built-in loader path
+(MMLU-Pro already fixed this in `split_policy.py` for its adapter).
+**Fix / decision:** extend `split_policy._SPLIT_ALIASES` with `mmlu: train →
+auxiliary_train`, resolve in `loaders.load_split`, and emit `ToyFallbackWarning` when
+the toy set stands in. Keeps one split-resolution module for all benchmarks.
+**Follow-up:** GPQA still has only an upstream `train` split; deterministic holdout for
+logical `test` is separate work.
+
 ## 2026-07-10 — Hidden-benchmark cached answers used a bare prompt, not the WORKER turn  #mistake #finding #decision
 
 **Context:** `scripts/build_benchmark.py::_cache_answers` pre-computes each pool
