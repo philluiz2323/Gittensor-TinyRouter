@@ -18,6 +18,7 @@ from trinity.adapters import (
     is_registered,
     register_adapter,
     register_builtin_adapters,
+    register_swebench_adapter,
 )
 from trinity.orchestration.dataset import SUPPORTED_BENCHMARKS
 
@@ -34,8 +35,9 @@ def test_builtins_registered_for_every_supported_benchmark():
     for name in SUPPORTED_BENCHMARKS:
         assert is_registered(name)
         assert isinstance(get_adapter(name), BenchmarkAdapter)
-    # The registry exposes exactly the supported benchmarks (no more, no less).
-    assert set(available_adapters()) == set(SUPPORTED_BENCHMARKS)
+    # The registry exposes at least the supported benchmarks; additional adapters
+    # (e.g. the SWE-bench Verified adapter, #17) may also be registered.
+    assert set(SUPPORTED_BENCHMARKS) <= set(available_adapters())
 
 
 def test_lookup_is_case_insensitive():
@@ -216,8 +218,10 @@ def test_decorator_registration_and_registry_isolation():
         assert is_registered("unit-test-bench")
         assert get_adapter("unit-test-bench").score_output("x", "x") == 1.0
     finally:
-        # Never leak test state into other tests: restore the real registry.
+        # Never leak test state into other tests: restore the real registry
+        # (both the built-in benchmarks and the SWE-bench adapter, #17).
         clear_registry()
         register_builtin_adapters()
+        register_swebench_adapter()
 
-    assert set(available_adapters()) == set(SUPPORTED_BENCHMARKS)
+    assert set(SUPPORTED_BENCHMARKS) <= set(available_adapters())
