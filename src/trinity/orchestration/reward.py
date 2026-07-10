@@ -33,6 +33,7 @@ module loads on a machine without it.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -466,18 +467,28 @@ def _as_number(s: str) -> float | None:
     return None
 
 
-def math_equal(a: str | None, b: str | None, *, rel_tol: float = 1e-6) -> bool:
+def math_equal(a: str | None, b: str | None, *, abs_tol: float = 1e-6) -> bool:
     """Compare two math answers for equality.
 
     Resolution order:
       1. Exact match after :func:`normalize_math_answer`.
-      2. Numeric match within ``rel_tol`` (handles ``0.5`` vs ``1/2`` etc.).
+      2. Numeric match within ``abs_tol`` -- an ABSOLUTE tolerance that only
+         bridges rounded float representations of the *same* value (e.g.
+         ``0.333333`` vs ``1/3``), never merging genuinely different numbers.
       3. Symbolic equality via ``sympy`` if it is importable (guarded).
+
+    The tolerance is deliberately absolute, not magnitude-scaled. The previous
+    ``rel_tol * max(1, |a|, |b|)`` threshold grew with the answer's size, so it
+    reached ``>= 1`` once ``|value| >= 1e6`` and graded off-by-one (or larger)
+    large integers as correct (issue #141). MATH500 contains such large-integer
+    answers; AIME (0-999) masked the bug. An absolute tolerance keeps the same
+    behaviour for the small/near-unit answers the bridge was written for while
+    comparing large answers exactly.
 
     Args:
         a: First answer (typically the candidate).
         b: Second answer (typically the reference).
-        rel_tol: Relative tolerance for the numeric comparison.
+        abs_tol: Absolute tolerance for the numeric comparison.
 
     Returns:
         ``True`` if the two answers are judged equal.
@@ -490,8 +501,7 @@ def math_equal(a: str | None, b: str | None, *, rel_tol: float = 1e-6) -> bool:
     fa = _as_number(na)
     fb = _as_number(nb)
     if fa is not None and fb is not None:
-        scale = max(1.0, abs(fa), abs(fb))
-        if abs(fa - fb) <= rel_tol * scale:
+        if math.isclose(fa, fb, rel_tol=0.0, abs_tol=abs_tol):
             return True
 
     return _sympy_equal(na, nb)
