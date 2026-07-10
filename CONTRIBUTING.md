@@ -61,6 +61,9 @@ ruff check src/
 mypy src/
 ```
 
+Pull requests also run the offline GitHub Actions lane described in
+[docs/CI.md](docs/CI.md).
+
 ## Journal
 
 Every non-obvious decision, mistake, or finding goes in

@@ -16,7 +16,7 @@ Built for SN74 on Gittensor. Contributors submit PRs that improve the live routi
 
 **Quick links:** [Website](https://james-cuda.github.io/Gittensor-TinyRouter/) ·
 [Leaderboard](leaderboard.json) · [Submission Guide](SUBMITTING.md) ·
-[Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
+[Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md) · [Glossary](docs/GLOSSARY.md)
 
 ## Current Competition
 

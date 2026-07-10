@@ -91,7 +91,11 @@ async def evaluate(
                     "reps_correct": votes,
                     "parse_rate": sum(parsed) / len(parsed),
                 }
-                per_query_binary[task.task_id] = int(2 * sum(votes) >= len(votes))
+                # Strict majority: a query counts as solved only when MORE than
+                # half of the reps are correct. Using >= would count an exact
+                # 50/50 split (any even reps, e.g. reps=2) as solved, inflating
+                # the honest per-query binary that feeds oracle_ceiling.py.
+                per_query_binary[task.task_id] = int(2 * sum(votes) > len(votes))
 
     await asyncio.gather(*[_one(t) for t in tasks])
 

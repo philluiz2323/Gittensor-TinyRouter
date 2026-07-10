@@ -63,7 +63,7 @@ def _try_load_hf(
     The loaded dataset object, or ``None`` if loading was not possible.
     """
     try:
-        from datasets import load_dataset  # type: ignore import-not-found
+        from datasets import load_dataset  # type: ignore[import-not-found]
     except Exception:
         return None
     try:

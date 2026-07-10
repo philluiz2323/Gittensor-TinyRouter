@@ -30,7 +30,7 @@ from typing import Any
 
 from trinity.types import Task
 
-from .base import BenchmarkAdapter, TaskType
+from .base import BenchmarkAdapter, ScoringMode, TaskType
 from .registry import register_adapter
 
 __all__ = [
@@ -210,7 +210,7 @@ def _row_get(row: Any, *keys: str, default: Any = None) -> Any:
 def _hf_swebench(split: str) -> list[Task] | None:
     """Load SWE-bench Verified from HuggingFace, or ``None`` on any failure."""
     try:
-        from datasets import load_dataset  # type: ignore import-not-found
+        from datasets import load_dataset  # type: ignore[import-not-found]
     except Exception:
         return None
     try:
@@ -319,6 +319,25 @@ class SweBenchAdapter(BenchmarkAdapter):
 
     def score_output(self, output: str, reference: Any) -> float:
         return score_patch(output, reference)
+
+    def scoring_modes(self) -> frozenset[ScoringMode]:
+        # SWE-bench supports BOTH: a cheap cached exact-match (score_cached ->
+        # score_output) and an expensive live run (score_execution) — the
+        # motivating "define one or both" case for #16.
+        return frozenset({ScoringMode.CACHED, ScoringMode.EXECUTION})
+
+    def score_execution(self, output: str, reference: Any, *, context: Any = None) -> float | None:
+        """Grade a patch by live execution when an executor is supplied.
+
+        ``context`` is an executor callable ``(output, reference) -> float`` (e.g.
+        one built on the sandboxed patch runner, #18). Without one, execution is
+        unavailable here and this returns ``None`` so the dispatcher falls back to
+        the cached exact-match path.
+        """
+        if callable(context):
+            result = context(output, reference)
+            return None if result is None else float(result)
+        return None
 
     def task_type(self) -> TaskType:
         return TaskType.PATCH

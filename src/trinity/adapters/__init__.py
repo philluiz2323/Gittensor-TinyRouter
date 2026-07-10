@@ -16,7 +16,7 @@ the interface and :mod:`trinity.adapters.registry` for the lookup.
 """
 from __future__ import annotations
 
-from .base import BenchmarkAdapter, TaskType
+from .base import BenchmarkAdapter, ScoringMode, TaskType
 from .benchmarks import (
     GpqaAdapter,
     LiveCodeBenchAdapter,
@@ -33,11 +33,22 @@ from .registry import (
     is_registered,
     register_adapter,
 )
+from .scoring import (
+    ScoringOutcome,
+    requires_execution,
+    score_item,
+    supports_execution,
+)
 from .swebench import PatchReference, SweBenchAdapter, register_swebench_adapter
 
 __all__ = [
     "BenchmarkAdapter",
     "TaskType",
+    "ScoringMode",
+    "ScoringOutcome",
+    "score_item",
+    "supports_execution",
+    "requires_execution",
     "DelegatingBenchmarkAdapter",
     "Math500Adapter",
     "MmluAdapter",

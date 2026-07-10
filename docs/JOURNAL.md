@@ -33,6 +33,20 @@ load_tasks('mmlu', 'test' ) -> n=5  real  ['mmlu-2', 'mmlu-1', ...]
 
 ---
 
+## 2026-07-10 — The default seed (0) made every CMA-ES run irreproducible  #mistake #gotcha #repro
+**Context:** `sep_cmaes.py` opens with "Thin, **deterministic** wrapper around the `cma` library" and documents `seed` as "RNG seed for reproducible sampling". Checking that claim before relying on it for receipt reproduction.
+**Expected:** `SepCMAES(n, seed=0)` twice in a row samples the same first population.
+**Actual:** it does not. Only *non-zero* seeds are honoured:
+```
+seed=0: identical first population? False   <-- the default everywhere
+seed=1: identical first population? True
+```
+**Root cause:** pycma special-cases the value. `cma.CMAOptions.defaults()["seed"]` documents itself as *"random number seed for `numpy.random`; `None` and `0` equate to `time`, `np.nan` means 'do nothing'"*. So `opts["seed"] = 0` means **seed from the clock**. And `0` was the default at every level: `SepCMAES(seed=0)`, `run(seed=0)`, `trinity.train --seed default=0`, and the class's own usage example on line 72. What hid it is that the *other* consumers of `args.seed` really are deterministic — `load_tasks(seed=...)` and `gen_rng = random.Random(seed*100000 + gen)` — so a re-run draws the same tasks in the same order and only the CMA-ES trajectory silently diverges. It looks reproducible until the fitness curve differs.
+**Fix / decision:** stop forwarding the seed to pycma. Pass `np.nan` (pycma's documented "do nothing") and call `np.random.seed(self.seed)` ourselves, since numpy treats `0` as an ordinary seed. This is behavior-preserving: pycma implements an honoured `seed=k` as exactly `np.random.seed(k)`, verified by a test that reconstructs the reference stream directly from `cma.CMAEvolutionStrategy` — so every previously-working seed keeps its byte-identical stream and archived fitness curves stay reproducible. `0` simply joins them. Rejected the tempting one-liner `seed or 1`, which would silently alias seeds 0 and 1 onto one stream (pinned by `test_zero_and_one_are_not_aliased`). Seeds outside `[0, 2**32-1]` now raise instead of reaching numpy.
+**Follow-up:** the wrapper still seeds the **global** `numpy.random` state — that is unchanged from before (pycma did it too), but it means constructing a `SepCMAES` perturbs unrelated numpy randomness in the process. Isolating it behind a `np.random.Generator` / pycma's `randn` option is worth doing separately. Also relevant to the receipt gate in `pr_eval.py`: a "plausible CMA-ES fitness curve" is only re-derivable now that the default seed is honoured.
+
+---
+
 ## 2026-07-10 — Hidden-benchmark cached answers used a bare prompt, not the WORKER turn  #mistake #finding #decision
 
 **Context:** `scripts/build_benchmark.py::_cache_answers` pre-computes each pool

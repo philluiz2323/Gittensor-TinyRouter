@@ -55,6 +55,31 @@ class TaskType(str, Enum):
         return self.value
 
 
+class ScoringMode(str, Enum):
+    """How a benchmark's answers get graded (issue #16).
+
+    Separates two evaluation costs so the pipeline can run each without mixing
+    concerns:
+
+    ``CACHED``
+        Cheap scoring of a stored answer against the reference — a string/letter
+        compare (MMLU, math) or a local sandboxed code run (LiveCodeBench). Runs
+        in the ordinary scoring round.
+    ``EXECUTION``
+        Expensive live execution beyond scoring a stored answer — checking out a
+        repository and running its test harness (SWE-bench). Optional, and run
+        through a dedicated executor rather than the cached round.
+
+    An adapter declares one or both via :meth:`BenchmarkAdapter.scoring_modes`.
+    """
+
+    CACHED = "cached"
+    EXECUTION = "execution"
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return self.value
+
+
 class BenchmarkAdapter(ABC):
     """One benchmark, behind a uniform interface.
 
@@ -123,6 +148,41 @@ class BenchmarkAdapter(ABC):
 
         candidate = committed_answer(self.name, traj)
         return self.score_output(candidate, traj.task.answer)
+
+    # -- Cached vs execution scoring (issue #16) ---------------------------- #
+    def scoring_modes(self) -> frozenset[ScoringMode]:
+        """Return the scoring paths this benchmark supports.
+
+        Defaults to ``{CACHED}`` — the common case (MMLU, math, code) is scored
+        cheaply from a stored answer. A benchmark that also needs a heavyweight
+        run (e.g. SWE-bench) overrides this to add :data:`ScoringMode.EXECUTION`.
+        The top-level dispatcher (:func:`trinity.adapters.scoring.score_item`)
+        reads this to route cheap and expensive benchmarks through one API.
+        """
+        return frozenset({ScoringMode.CACHED})
+
+    def score_cached(self, output: str, reference: Any) -> float:
+        """Cheap cached scoring: grade a stored answer against ``reference``.
+
+        Defaults to :meth:`score_output`, so every existing adapter keeps its
+        current cached behaviour unchanged. This is the path the ordinary scoring
+        round uses.
+        """
+        return self.score_output(output, reference)
+
+    def score_execution(
+        self, output: str, reference: Any, *, context: Any = None
+    ) -> float | None:
+        """Expensive execution scoring, or ``None`` if unavailable.
+
+        Default is ``None`` — most benchmarks do not need live execution. An
+        adapter declaring :data:`ScoringMode.EXECUTION` implements this to grade
+        via a heavyweight run; ``context`` carries whatever that run needs (e.g.
+        a prepared work-tree or an executor callable), supplied by the caller.
+        Returning ``None`` signals "could not execute" so the dispatcher falls
+        back to :meth:`score_cached` instead of guessing.
+        """
+        return None
 
     def cache_baselines(self, task: "Task", pool: Any) -> dict[str, Any] | None:
         """Optionally pre-compute per-model baseline answers/scores for ``task``.

@@ -23,7 +23,6 @@ import numpy as np
 import yaml
 
 from .adapters import get_adapter
-from .coordinator import params as P
 from .coordinator.policy import CoordinatorPolicy
 from .llm.openrouter_client import OpenRouterPool
 from .orchestration.session import run_trajectory
@@ -89,12 +88,53 @@ def task_rng(seed: int, task_id: str) -> random.Random:
     return random.Random(f"{seed}:{task_id}")
 
 
+def _reduce_scores(scores: list, *, label: str) -> float:
+    """Average per-task scores, counting a failed trajectory as ``0.0``.
+
+    ``asyncio.gather(..., return_exceptions=True)`` returns a :class:`BaseException`
+    in place of any task whose trajectory exhausted its retries (e.g. a persistent
+    ``httpx.ReadTimeout``). Such a task degrades to a score of ``0.0`` instead of
+    aborting the whole evaluation — the same pessimistic convention training already
+    uses (:mod:`trinity.optim.fitness`). The failed task stays in the denominator: it
+    produced no answer, so it is not correct, and dropping it would inflate the mean
+    by survivorship.
+
+    Args:
+        scores: Per-task scores, each either a ``float`` or the :class:`BaseException`
+            raised while producing it.
+        label: Scorer name, shown in the degraded-run warning.
+
+    Returns:
+        The mean task score.
+
+    Raises:
+        RuntimeError: If *every* task failed. A dead API must not be reportable as a
+            measurement of ``0.0`` accuracy, so the caller aborts rather than writing
+            a meaningless results file.
+    """
+    n_failed = sum(isinstance(s, BaseException) for s in scores)
+    if scores and n_failed == len(scores):
+        raise RuntimeError(
+            f"{label}: all {len(scores)} trajectories failed (last error: "
+            f"{type(scores[-1]).__name__}: {scores[-1]}); refusing to report 0.0."
+        )
+    if n_failed:
+        print(f"  [warn] {label}: {n_failed}/{len(scores)} trajectories failed "
+              "(counted as 0.0); the reported score is degraded.", flush=True)
+    return float(mean(0.0 if isinstance(s, BaseException) else s for s in scores))
+
+
 async def _score_policy(
-    tasks, policy, pool, pool_models, *, adapter, sample, rng_seed: int | None = None, **run_kwargs
+    tasks, policy, pool, pool_models, *, adapter, sample, rng_seed: int | None = None,
+    label: str = "routing", **run_kwargs,
 ) -> float:
     import httpx
 
     async with httpx.AsyncClient() as cli:
+        # return_exceptions=True so one trajectory that exhausts retries (e.g. a
+        # persistent timeout) degrades to 0.0 instead of discarding the whole eval —
+        # and every baseline already computed before it. Matches training
+        # (trinity.optim.fitness), which tolerates the same error.
         trajs = await asyncio.gather(
             *[
                 run_trajectory(
@@ -103,11 +143,14 @@ async def _score_policy(
                     **run_kwargs,
                 )
                 for t in tasks
-            ]
+            ],
+            return_exceptions=True,
         )
     # Score through the adapter (not reward.score directly) so the routed path
-    # honours the same benchmark contract as the single-model baseline.
-    return float(mean(adapter.score_trajectory(t) for t in trajs))
+    # honours the same benchmark contract as the single-model baseline. A failed
+    # trajectory is kept as its exception and scored 0.0 by _reduce_scores.
+    scores = [t if isinstance(t, BaseException) else adapter.score_trajectory(t) for t in trajs]
+    return _reduce_scores(scores, label=label)
 
 
 async def _score_single_model(tasks, pool, model, adapter, *, max_tokens, reasoning) -> float:
@@ -123,8 +166,11 @@ async def _score_single_model(tasks, pool, model, adapter, *, max_tokens, reason
                                   reasoning=reasoning, client=cli)
             return adapter.score_output(res.text, task.answer)
 
-        scores = await asyncio.gather(*[one(t) for t in tasks])
-    return float(mean(scores))
+        # return_exceptions=True: a single retry-exhausted task degrades to 0.0 rather
+        # than aborting the baseline (and discarding the other baselines this run
+        # already computed).
+        scores = await asyncio.gather(*[one(t) for t in tasks], return_exceptions=True)
+    return _reduce_scores(scores, label=f"single::{model}")
 
 
 async def evaluate(args) -> dict:
@@ -167,7 +213,7 @@ async def evaluate(args) -> dict:
     theta = np.load(args.theta)
     policy.configure(theta, spec)
     s_trinity = await _score_policy(tasks, policy, pool, pool_models, adapter=adapter,
-                                    sample=False, **run_kwargs)
+                                    sample=False, label="TRINITY", **run_kwargs)
     results["TRINITY"] = s_trinity
     print(f"  TRINITY (trained)        = {s_trinity:.4f}")
 
@@ -181,7 +227,8 @@ async def evaluate(args) -> dict:
         seed_s = args.seed * 10000 + s
         rand = RandomPolicy(n_models, seed=seed_s)
         s_r = await _score_policy(tasks, rand, pool, pool_models, adapter=adapter,
-                                  sample=False, rng_seed=seed_s, **run_kwargs)
+                                  sample=False, rng_seed=seed_s, label="random routing",
+                                  **run_kwargs)
         rand_scores.append(s_r)
     s_rand = float(mean(rand_scores))
     results["random_routing"] = s_rand

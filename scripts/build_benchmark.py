@@ -113,24 +113,30 @@ async def _cache_answers(items: List[Dict], pool, pool_models: List[str]) -> Non
 
 
 def _task_to_item(task: Any, index: int) -> Dict:
-    """Convert a trinity Task to a benchmark item dict (shape unchanged).
+    """Convert a trinity Task to a protocol on-disk benchmark item dict."""
+    from trinity.adapters import get_adapter
+    from trinity.adapters.hidden_item import from_adapter_task, to_protocol_item
 
-    ``index`` is the task's position in the sampled pool; it only feeds the
-    deterministic id fallback (``protocol.question_id``) for tasks without a
-    stable ``task_id``.
-    """
     benchmark = getattr(task, "benchmark", "math500") or "math500"
-    prompt = getattr(task, "prompt", "")
-    return {
-        "question_id": protocol.question_id(
-            benchmark, index, prompt, existing=getattr(task, "task_id", None)
-        ),
-        "question_text": prompt,
-        "task_type": protocol.task_type(benchmark),
-        "benchmark": benchmark,
-        "correct_answer": getattr(task, "answer", None),
-        "model_answers": {},
-    }
+    try:
+        adapter = get_adapter(benchmark)
+        canonical = from_adapter_task(adapter, task)
+        item = to_protocol_item(canonical)
+    except KeyError:
+        prompt = getattr(task, "prompt", "")
+        item = {
+            "question_id": protocol.question_id(
+                benchmark, index, prompt, existing=getattr(task, "task_id", None)
+            ),
+            "question_text": prompt,
+            "task_type": protocol.task_type(benchmark),
+            "benchmark": benchmark,
+            "correct_answer": getattr(task, "answer", None),
+            "model_answers": {},
+        }
+    if "model_answers" not in item:
+        item["model_answers"] = {}
+    return item
 
 
 async def build_benchmark(benchmark: str, output_dir: str, password: str) -> str:
