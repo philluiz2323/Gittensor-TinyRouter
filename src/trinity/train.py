@@ -23,6 +23,7 @@ import yaml
 from .coordinator import params as P
 from .coordinator.policy import CoordinatorPolicy
 from .llm.openrouter_client import OpenRouterPool
+from .optim.budget import AtomicEvalBudget
 from .optim.fitness import FitnessConfig, evaluate_candidate, evaluate_population
 from .optim.selection import ValidationSelector
 from .optim.sep_cmaes import SepCMAES, default_popsize
@@ -140,6 +141,18 @@ async def train(args) -> dict:
     generations = args.generations or sc.get("generations", 60)
     sigma0 = sc.get("sigma0", 0.1)
 
+    # Atomic-eval budget cap (SPEC §5.2: T = ⌊B_env / (m_cma·λ)⌋). Opt-in via --budget:
+    # when set, cap T to what the budget affords and track consumption. Default off
+    # (--budget 0) -> generations governed by config, no cap (behaviour unchanged).
+    budget_b_env = getattr(args, "budget", 0) or 0
+    budget: AtomicEvalBudget | None = None
+    if budget_b_env > 0:
+        budget = AtomicEvalBudget(b_env=budget_b_env, m_cma=m_cma, popsize=popsize)
+        if budget.max_generations < generations:
+            print(f"[train] atomic-eval budget {budget_b_env}: capping T {generations} -> "
+                  f"{budget.max_generations} (cost/gen = m_cma·λ = {budget.cost_per_generation})")
+        generations = min(generations, budget.max_generations)
+
     # Validation-based model selection (issue #172). Default off (val_fraction=0.0)
     # -> save es.best() and run all generations, exactly as before.
     _val_arg = getattr(args, "val_fraction", None)
@@ -247,6 +260,13 @@ async def train(args) -> dict:
         (run_dir / "history.json").write_text(json.dumps(history, indent=2))
         gen += 1
 
+        if budget is not None:
+            budget.record_generation()
+            if budget.exhausted:
+                print(f"[train] atomic-eval budget spent: {budget.consumed}/{budget.b_env} "
+                      f"({budget.fraction_used:.1%}) after {gen} generation(s)")
+                break
+
         if selector is not None and selector.should_stop(patience):
             print(f"[train] early stop: no val improvement for {patience} generation(s) "
                   f"(best val={selector.best_val_fitness:.3f} @ gen {selector.best_gen})")
@@ -273,6 +293,9 @@ async def train(args) -> dict:
         # from and its held-out score.
         summary["selected_generation"] = selector.best_gen
         summary["val_fitness"] = float(selector.best_val_fitness)
+    if budget is not None:
+        # Atomic-eval budget accounting for the receipt/audit trail (SPEC §5.2).
+        summary["atomic_eval_budget"] = budget.report()
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print(f"[train] DONE. best_fitness={best_f:.4f}  -> {run_dir}")
     return summary
@@ -290,6 +313,9 @@ def main() -> None:
     ap.add_argument("--generations", type=int, default=0, help="override config T")
     ap.add_argument("--popsize", type=int, default=0, help="override λ")
     ap.add_argument("--m-cma", type=int, default=0, dest="m_cma", help="override replications")
+    ap.add_argument("--budget", type=int, default=0, dest="budget",
+                    help="atomic-eval (B_env) cap: run T=floor(B_env/(m_cma·λ)) generations "
+                         "and stop when spent (SPEC §5.2); 0 (default) disables the cap")
     ap.add_argument("--val-fraction", type=float, default=None, dest="val_fraction",
                     help="held-out validation share for model selection (overrides config; "
                          "0.0 disables, the default)")
