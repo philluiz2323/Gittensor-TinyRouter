@@ -37,21 +37,10 @@ def _estimate_cost() -> float:
     ledger_path = os.environ.get("TRINITY_COST_LEDGER")
     if not ledger_path:
         return 0.0
-    try:
-        from trinity.llm.cost_ledger import read_ledger_entries, verify_ledger_chain
+    from trinity.llm.openrouter_pricing import verified_ledger_total_usd
 
-        valid, _, _ = verify_ledger_chain(ledger_path)
-        if not valid:
-            return 0.0
-
-        total = 0.0
-        pricing = {"qwen3.5-35b-a3b": 0.90, "minimax-m3": 0.90, "deepseek-v4-flash": 0.90}
-        for entry in read_ledger_entries(ledger_path):
-            price = pricing.get(entry.model, 0.90)
-            total += price * entry.total_tokens / 1_000_000
-        return round(total, 4)
-    except Exception:
-        return 0.0
+    total = verified_ledger_total_usd(ledger_path)
+    return round(total, 4) if total is not None else 0.0
 
 
 def build_receipt(run_dir: Path, benchmark: str) -> dict:

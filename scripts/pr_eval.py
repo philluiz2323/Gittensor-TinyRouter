@@ -411,6 +411,7 @@ def _validate_receipt(receipt: dict) -> Optional[str]:
 def _evaluate_cached(head, encoder, items: List[dict], pool_model_names: List[str]) -> float:
     """Evaluate a head on cached benchmark items. Returns accuracy [0, 1]."""
     import torch
+    from trinity.adapters.hidden_item import from_protocol_item
     from trinity.orchestration.reward import score_text
 
     if not items:
@@ -418,12 +419,13 @@ def _evaluate_cached(head, encoder, items: List[dict], pool_model_names: List[st
 
     correct = 0
     for item in items:
-        h_np = encoder.encode(item["question_text"])
+        canonical = from_protocol_item(item)
+        h_np = encoder.encode(canonical["prompt"])
         h_t = torch.as_tensor(np.asarray(h_np, dtype=np.float32), device=head.weight.device)
         agent_idx, _role, _dbg = head.select(h_t, sample=False)
         model_name = pool_model_names[agent_idx % len(pool_model_names)]
-        cached = item.get("model_answers", {}).get(model_name, "")
-        if score_text(item.get("benchmark", "math500"), cached, item.get("correct_answer")) > 0.0:
+        cached = canonical["cached_model_answers"].get(model_name, "")
+        if score_text(canonical["benchmark"] or "math500", cached, canonical["reference"]) > 0.0:
             correct += 1
 
     return correct / len(items)
@@ -439,6 +441,7 @@ async def _evaluate_live(
 ) -> Tuple[float, float]:
     """Run full multi-turn eval with real API calls. Returns (accuracy, avg_turns)."""
     import httpx
+    from trinity.adapters.hidden_item import from_protocol_item
     from trinity.orchestration.reward import score
     from trinity.orchestration.session import run_trajectory
     from trinity.types import Task
@@ -446,12 +449,15 @@ async def _evaluate_live(
     if not items:
         return 0.0, 0.0
 
-    tasks = [Task(
-        task_id=item.get("question_id", f"q{i}"),
-        benchmark=item.get("benchmark", "math500"),
-        prompt=item["question_text"],
-        answer=item.get("correct_answer"),
-    ) for i, item in enumerate(items)]
+    tasks = []
+    for i, item in enumerate(items):
+        canonical = from_protocol_item(item)
+        tasks.append(Task(
+            task_id=canonical["task_id"] or f"q{i}",
+            benchmark=canonical["benchmark"] or "math500",
+            prompt=canonical["prompt"],
+            answer=canonical["reference"],
+        ))
 
     correct = 0
     total_turns = 0
@@ -524,6 +530,7 @@ def _compute_novelty(head, encoder, eval_items: List[dict],
         return 0.5
 
     import torch
+    from trinity.adapters.hidden_item import from_protocol_item
     from trinity.coordinator.head import LinearHead
 
     try:
@@ -538,7 +545,8 @@ def _compute_novelty(head, encoder, eval_items: List[dict],
     ref_count = min(50, len(eval_items))
     matches = 0
     for item in eval_items[:ref_count]:
-        h_np = encoder.encode(item["question_text"])
+        canonical = from_protocol_item(item)
+        h_np = encoder.encode(canonical["prompt"])
         h_t = torch.as_tensor(np.asarray(h_np, dtype=np.float32), device=head.weight.device)
 
         sub_agent, sub_role, _ = head.select(h_t, sample=False)
