@@ -18,6 +18,26 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — pack_submission priced ledger with flat blended rate, not in/out split  #mistake #finding #decision
+**Context:** wiring training receipts (`scripts/pack_submission.py`) to the verified
+cost ledger after #87 landed `trinity.llm.cost_ledger`.
+**Expected:** `receipt.json` → `total_cost_usd` matches
+`scripts/cost_report.py --ledger` on the same file (per-model prompt vs
+completion rates).
+**Actual:** pack used a hard-coded ``0.90 * (p + c) / 1M`` for every model.
+Example — 1M prompt tokens on qwen3.5-35b-a3b: cost_report charges **$0.14**;
+pack wrote **$0.90** into the receipt. Gate 4 (`pr_eval.py`) cross-checks
+``total_cost_usd`` against a plausible training spend, so receipts disagreed
+with maintainer tooling and could false-pass or false-fail the minimum-cost gate.
+**Root cause:** ledger verification was centralized in #87, but dollar pricing
+still lived only in `cost_report.py` while pack kept a stale blended shortcut.
+**Fix / decision:** add `trinity.llm.openrouter_pricing` as the single rate table
++ `token_cost` / `verified_ledger_total_usd` helpers; route both
+`cost_report.py` and `pack_submission.py` through it. Covered by
+`tests/test_openrouter_pricing.py`.
+**Follow-up:** `trinity.fugu.cost.PRICES` and oracle-ceiling defaults remain a
+separate table — dedupe is tracked in the open refactor PR #8.
+
 ## 2026-07-10 — Cost-ledger verifier hashed a different JSON string than the writer  #mistake #decision
 **Context:** checking the token-cost ledger path used by training, `cost_report.py`,
 and submission packing.

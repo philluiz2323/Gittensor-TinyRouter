@@ -22,15 +22,15 @@ import argparse
 import sys
 
 from trinity.llm.cost_ledger import read_ledger_entries, verify_ledger_chain
+from trinity.llm.openrouter_pricing import (
+    OPENROUTER_POOL_PRICES,
+    default_blended_rates,
+    token_cost,
+)
 
-# ---- OpenRouter prices ($ per 1M tokens), (input, output). ----
-PRICES = {
-    "qwen3.5-35b-a3b": (0.14, 1.00),
-    "minimax-m3":      (0.30, 1.20),
-    "deepseek-v4-flash": (0.09, 0.18),
-}
-_DEFAULT_BLENDED_IN = sum(p[0] for p in PRICES.values()) / len(PRICES)
-_DEFAULT_BLENDED_OUT = sum(p[1] for p in PRICES.values()) / len(PRICES)
+# Back-compat alias for scripts/tests that import PRICES from cost_report.
+PRICES = OPENROUTER_POOL_PRICES
+_DEFAULT_BLENDED_IN, _DEFAULT_BLENDED_OUT = default_blended_rates()
 
 
 def cost(prompt_tok: int, completion_tok: int, in_rate: float, out_rate: float) -> float:
@@ -58,8 +58,7 @@ def report_ledger(path: str) -> None:
     print(f"{'model':18s} {'calls':>8s} {'prompt_tok':>12s} {'compl_tok':>12s} {'$':>9s}")
     print("-" * 64)
     for m, (p, c, n) in sorted(per.items()):
-        ir, orr = PRICES.get(m, (_DEFAULT_BLENDED_IN, _DEFAULT_BLENDED_OUT))
-        d = cost(p, c, ir, orr)
+        d = token_cost(m, p, c)
         total += d
         print(f"{m:18s} {n:8d} {p:12d} {c:12d} {d:9.3f}")
     print("-" * 64)
