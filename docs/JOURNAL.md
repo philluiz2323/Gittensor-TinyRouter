@@ -32,6 +32,33 @@ load_tasks('mmlu', 'test' ) -> n=5  real  ['mmlu-2', 'mmlu-1', ...]
 **Follow-up:** `gpqa` is gated on HF (`Idavidrein/gpqa`) and only publishes a `train` split, so loading its `test` split still falls back — now *with a warning* rather than silently. Deciding whether to deterministically partition that single split into train/test is left as separate work, as is threading `allow_toy_fallback=False` up through the `BenchmarkAdapter.load_tasks` contract into `train.py` and `scripts/build_benchmark.py`, which should never accept toy data. See #14 (freeze the sampling protocol) — that work needs split names that resolve at all, which is what this entry fixes.
 
 ---
+## 2026-07-10 — Duplicate-detection gate (Gate 3) defeated by re-rolling SVF scales  #mistake #finding #decision
+
+**Context:** auditing the anti-cheat gates in `scripts/pr_eval.py`. Gate 3
+(`_check_duplicate`) enforces "original work" by cosine-comparing a submission
+against every prior one, rejecting matches above `_COPY_THRESHOLD = 0.999`.
+**Expected:** copying another miner's trained routing head should be rejected.
+**Actual:** the gate concatenated the head block (6×1024 = 6144 values) and the
+SVF block (7168 values) into ONE vector and compared that. The SVF singular-value
+scales start at the identity (all 1.0) and move little, so every submission's SVF
+block is near-identical to every other's — and it is the larger block, so it
+dominates the cosine. Repro (numpy): copy a rival's head **verbatim** (head cosine
+1.0) and re-roll only the SVF scales → concatenated cosine ≈ **0.9986 < 0.999**, so
+the copied head **passes**. The SVF block both masks copied heads (false negatives)
+and, when SVF is tight, can push honest distinct heads over the line (false
+positives).
+**Root cause:** mixing a near-constant, higher-dimensional block (SVF) with the
+small discriminative block (the head) into a single cosine — the meaningful signal
+(the head) is a minority of the norm.
+**Fix / decision:** compare the HEAD blocks directly (the head is the trained
+artifact "original work" refers to — it alone drives routing). SVF cosine is still
+computed and reported for context but never masks a copied head. A shape-mismatch
+guard skips non-comparable prior heads. Covered by
+`tests/test_pr_eval_duplicate.py`: the copy-head/re-roll-SVF evasion is now caught,
+exact copies are caught, distinct heads and self pass.
+**Follow-up:** none for this bug. (Adjacent, out of scope: warm-started next-gen
+heads from the same miner are compared against their own prior gens; if incremental
+warm-starts should be allowed, the self-vs-prior-gen policy needs its own decision.)
 
 ## 2026-07-10 — The default seed (0) made every CMA-ES run irreproducible  #mistake #gotcha #repro
 **Context:** `sep_cmaes.py` opens with "Thin, **deterministic** wrapper around the `cma` library" and documents `seed` as "RNG seed for reproducible sampling". Checking that claim before relying on it for receipt reproduction.

@@ -224,14 +224,40 @@ def _validate_weights(head_W: np.ndarray, svf_scales: np.ndarray) -> Optional[st
 # Gate 3: Duplicate Detection
 # ==========================================================================
 
-def _check_duplicate(head_vec: np.ndarray, submissions_root: Path,
-                      current_miner: str, current_gen: int) -> Optional[str]:
-    """Check cosine similarity against ALL previous submissions.
+def _check_duplicate(head_W: np.ndarray, svf_scales: np.ndarray,
+                     submissions_root: Path,
+                     current_miner: str, current_gen: int) -> Optional[str]:
+    """Reject a submission whose trained routing HEAD duplicates a prior one.
 
-    Scans submissions/*/merged/ and looks for near-identical weight vectors.
-    Returns None if unique, error string with the matched miner/gen if duplicate.
+    The routing head is the trained artifact that "original work" refers to: it
+    alone decides which pool model and role each query is sent to, so it is what
+    a copy would steal. The SVF singular-value scales, by contrast, start at the
+    identity (all 1.0) and move only a little, so *every* submission's SVF block
+    is near-identical to every other's regardless of who trained it.
+
+    Folding both blocks into one cosine (the previous behaviour) let that
+    near-constant SVF block — which is also the larger of the two (7168 vs 6144
+    values) — dominate the similarity. A copied head could then slip under the
+    threshold just by re-rolling the meaningless SVF scales: with an identical
+    head, the concatenated cosine falls to ~0.9986, below the 0.999 gate. So the
+    gate now compares the HEAD blocks directly; the SVF cosine is reported for
+    context but never masks a copied head.
+
+    Returns None if unique, or an error string naming the matched submission and
+    both per-block similarities.
     """
-    # Check all submission directories
+    head = np.asarray(head_W, dtype=np.float64).ravel()
+    svf = np.asarray(svf_scales, dtype=np.float64).ravel()
+
+    def _match(other_hw: np.ndarray, other_sv: np.ndarray) -> Optional[tuple[float, float]]:
+        other_head = np.asarray(other_hw, dtype=np.float64).ravel()
+        if other_head.size != head.size:
+            return None  # different head geometry -> not comparable
+        h_sim = _cosine_similarity(head, other_head)
+        s_sim = _cosine_similarity(svf, np.asarray(other_sv, dtype=np.float64).ravel())
+        return (h_sim, s_sim) if h_sim > _COPY_THRESHOLD else None
+
+    # Check all submission directories.
     for sub_dir in sorted(submissions_root.glob("*/*/")):
         parts = sub_dir.relative_to(submissions_root).parts
         if len(parts) < 2:
@@ -246,18 +272,17 @@ def _check_duplicate(head_vec: np.ndarray, submissions_root: Path,
             continue
 
         try:
-            other_hw = np.load(str(hw_path)).astype(np.float64).ravel()
-            other_sv = np.load(str(sv_path)).astype(np.float64).ravel()
+            other_hw = np.load(str(hw_path))
+            other_sv = np.load(str(sv_path))
         except (ValueError, OSError):
             continue
 
-        other_vec = np.concatenate([other_hw, other_sv])
-        sim = _cosine_similarity(head_vec, other_vec)
+        hit = _match(other_hw, other_sv)
+        if hit is not None:
+            return (f"duplicate_of_{other_miner}_gen_{other_gen}"
+                    f"_head_sim_{hit[0]:.4f}_svf_sim_{hit[1]:.4f}")
 
-        if sim > _COPY_THRESHOLD:
-            return f"duplicate_of_{other_miner}_gen_{other_gen}_sim_{sim:.4f}"
-
-    # Also check the current king from leaderboard
+    # Also check the current king from the leaderboard.
     lb = _load_leaderboard()
     for bench_name, bench_entry in lb.get("benchmarks", {}).items():
         king_miner = bench_entry.get("best_miner", "")
@@ -268,14 +293,14 @@ def _check_duplicate(head_vec: np.ndarray, submissions_root: Path,
             sv_path = king_dir / "svf_scales.npy"
             if hw_path.exists() and sv_path.exists():
                 try:
-                    king_hw = np.load(str(hw_path)).astype(np.float64).ravel()
-                    king_sv = np.load(str(sv_path)).astype(np.float64).ravel()
-                    king_vec = np.concatenate([king_hw, king_sv])
-                    sim = _cosine_similarity(head_vec, king_vec)
-                    if sim > _COPY_THRESHOLD:
-                        return f"duplicate_of_king_{king_miner}_gen_{king_gen}_sim_{sim:.4f}"
+                    king_hw = np.load(str(hw_path))
+                    king_sv = np.load(str(sv_path))
                 except (ValueError, OSError):
-                    pass
+                    continue
+                hit = _match(king_hw, king_sv)
+                if hit is not None:
+                    return (f"duplicate_of_king_{king_miner}_gen_{king_gen}"
+                            f"_head_sim_{hit[0]:.4f}_svf_sim_{hit[1]:.4f}")
 
     return None
 
@@ -590,11 +615,6 @@ async def evaluate_pr(pr_number: int, benchmark: str,
         return _reject("load_failed", "Failed to load submission files")
     head_W, svf_scales, receipt = loaded
 
-    head_vec = np.concatenate([
-        np.asarray(head_W, dtype=np.float64).ravel(),
-        np.asarray(svf_scales, dtype=np.float64).ravel(),
-    ])
-
     # ══════════════════════════════════════════════════════════════
     # GATE 1: Rate Limiting (before any GPU/API work)
     # ══════════════════════════════════════════════════════════════
@@ -614,7 +634,7 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     # GATE 3: Duplicate Detection (cosine similarity vs all history)
     # ══════════════════════════════════════════════════════════════
     submissions_root = _REPO / "submissions"
-    err = _check_duplicate(head_vec, submissions_root, miner_name, generation)
+    err = _check_duplicate(head_W, svf_scales, submissions_root, miner_name, generation)
     if err:
         return _reject(err)
 

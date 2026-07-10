@@ -18,6 +18,7 @@ from trinity.adapters import (
     is_registered,
     register_adapter,
     register_builtin_adapters,
+    register_livecodebench_v6_adapter,
     register_mmlu_pro_adapter,
     register_swebench_adapter,
 )
@@ -39,7 +40,7 @@ def test_builtins_registered_for_every_supported_benchmark():
     # The registry exposes at least the supported benchmarks; additional adapters
     # (e.g. the SWE-bench Verified (#17) and MMLU-Pro (#12) adapters) may also be
     # registered.
-    assert set(SUPPORTED_BENCHMARKS) <= set(available_adapters())
+    assert set(SUPPORTED_BENCHMARKS) | {"livecodebench_v6"} <= set(available_adapters())
 
 
 def test_lookup_is_case_insensitive():
@@ -225,7 +226,8 @@ def test_decorator_registration_and_registry_isolation():
         # adapters).
         clear_registry()
         register_builtin_adapters()
+        register_livecodebench_v6_adapter()
         register_swebench_adapter()
         register_mmlu_pro_adapter()
 
-    assert set(SUPPORTED_BENCHMARKS) <= set(available_adapters())
+    assert set(SUPPORTED_BENCHMARKS) | {"livecodebench_v6"} <= set(available_adapters())

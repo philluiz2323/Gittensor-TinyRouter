@@ -26,8 +26,13 @@ from trinity.types import Task
 from . import loaders
 from .base import BenchmarkAdapter, TaskType
 from .benchmarks import register_builtin_adapters
+from .registry import register_adapter
 
-__all__ = ["DelegatingBenchmarkAdapter", "register_builtin_adapters"]
+__all__ = [
+    "DelegatingBenchmarkAdapter",
+    "register_builtin_adapters",
+    "register_livecodebench_v6_adapter",
+]
 
 
 def _task_type_for(benchmark: str) -> TaskType:
@@ -92,3 +97,12 @@ class DelegatingBenchmarkAdapter(BenchmarkAdapter):
             "task_type": self._task_type.value,
             "meta": dict(task.meta),
         }
+
+
+def register_livecodebench_v6_adapter() -> None:
+    """Register the dedicated LiveCodeBench v6 adapter if it is absent."""
+    from .livecodebench import LiveCodeBenchV6Adapter
+    from .registry import is_registered
+
+    if not is_registered("livecodebench_v6"):
+        register_adapter("livecodebench_v6", LiveCodeBenchV6Adapter())
