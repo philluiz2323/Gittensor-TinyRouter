@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — `main` went red: cache-prompt test not updated for the `_cache_answers` refactor  #mistake #gotcha
+
+**Context:** two changes landed close together — the cache-prompt fix (which added
+`tests/test_build_benchmark_cache_prompt.py`, asserting `_cache_answers` uses a
+WORKER turn) and the #62 refactor that routes caching through the adapter registry.
+**Expected:** green `main`.
+**Actual:** `pytest` fails 2/2 in `test_build_benchmark_cache_prompt.py`. #62 changed
+`_cache_answers(items, ...)` to `_cache_answers(task_item_pairs, ...)` — it now takes
+`(task, item)` pairs and renders the prompt via `get_adapter(task.benchmark)
+.build_prompt(task)` — but the test still called the old `(items, ...)` signature.
+**Root cause:** the test encoded the *old* call shape; the refactor updated the
+function and its caller but not this test, and with no CI gate the break merged.
+**Fix / decision:** update the test to the `(task, item)` pair API and assert the
+prompt equals `build_messages(Role.WORKER, adapter.build_prompt(task), [])` (still
+pinning the WORKER-turn behaviour, now through the adapter). The `_cache_answers`
+WORKER-turn fix itself is intact after #62; only the test was stale. Full suite
+green again.
+**Follow-up:** the offline PR CI in #52 would have caught this; worth landing.
+
 ## 2026-07-10 — Duplicate-detection gate (Gate 3) defeated by re-rolling SVF scales  #mistake #finding #decision
 
 **Context:** auditing the anti-cheat gates in `scripts/pr_eval.py`. Gate 3
