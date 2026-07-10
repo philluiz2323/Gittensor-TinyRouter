@@ -218,7 +218,14 @@ def _task_reward(traj, cfg: FitnessConfig, max_turns: int) -> float:
     if not cfg.shaping_active:
         return correct
     benchmark = (traj.task.benchmark or "").strip().lower()
-    answer_text = traj.final_answer or ""
+    # Judge format validity on the SAME text correctness is scored against: the
+    # committed answer (most-recent turn with an extractable answer), not just
+    # the last Worker output. Otherwise a trajectory scored correct via an answer
+    # boxed in an earlier turn — whose final turn re-phrased without re-boxing —
+    # is denied the format bonus it earned, distorting fitness among correct
+    # trajectories. reward.has_answer's contract is to stay consistent with
+    # reward.score; this keeps the format bonus consistent too.
+    answer_text = _reward.committed_answer(benchmark, traj)
     has_ans = _reward.has_answer(benchmark, answer_text)
     return shaped_reward(
         int(round(correct)),

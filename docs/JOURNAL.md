@@ -18,6 +18,30 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — Shaped-fitness format bonus judged the wrong text  #mistake #decision
+
+**Context:** reading `optim/fitness._task_reward` while auditing the training-only shaping
+(issue #118).
+**Expected:** the `format_bonus` term rewards a trajectory that produced a parseable answer,
+consistent with how correctness is scored.
+**Actual:** correctness came from `reward.score` (which picks the *committed* answer — the most
+recent turn with an extractable answer), but `has_answer` was applied to `traj.final_answer`
+alone. A trajectory that boxed its answer in an early turn and then re-phrased in the final turn
+was scored **correct** yet denied the format bonus: shaped reward `0.9875` where a re-boxing
+trajectory got `1.0375`.
+**Root cause:** two different notions of "the answer" in one function — `_committed_answer` for
+correctness, `final_answer` for the format predicate — even though `reward.has_answer`'s own
+docstring says it exists to "stay consistent with can be scored" and `_committed_answer` is
+literally defined by iterating `has_answer` over the turns.
+**Fix / decision:** compute `has_ans` on `reward.committed_answer(benchmark, traj)` — the same
+text correctness is judged on. `[OUR CHOICE]` this only changes behavior in the bug case
+(early-turn answer, non-parseable final); when `final_answer` already parses, `committed ==
+final` and the result is unchanged, so no existing curve shifts except where it was wrong.
+Eval stays pure binary (unaffected — it never calls `_task_reward`).
+**Follow-up:** the format bonus and the turn penalty now compound correctly — a trajectory that
+answers early is no longer double-charged (short-trajectory penalty credit *and* a spurious
+format-bonus withholding).
+
 ## 2026-07-10 — R1/R2 gave TRINITY 5x the token budget of the baselines it beat  #mistake #gotcha
 **Context:** auditing `trinity/eval.py` against SPEC §1.3 before trusting an R1/R2 verdict.
 **Expected:** the single-model baselines are budget-matched to TRINITY, as SPEC §1.3.4 requires: *"run each single model at `max_tokens = 20,480` (5×) so the single-vs-TRINITY comparison is fair, matching the paper's 5× protocol."* The same 5× appears in the 2026-06-22 SPEC-decisions entry and in SPEC's own R1 row (*"budget-matched 5×"*).
