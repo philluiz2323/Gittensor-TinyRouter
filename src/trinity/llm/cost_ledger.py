@@ -19,9 +19,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sys
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Iterator, TextIO
 
 __all__ = [
     "LedgerEntry",
@@ -32,6 +36,7 @@ __all__ = [
     "verify_ledger_chain",
     "verify_ledger_chain_text",
     "read_ledger_entries",
+    "tip_hash_from_text",
     "append_ledger_entry",
     "summarize_token_usage",
 ]
@@ -223,6 +228,75 @@ def read_ledger_entries(path: str | Path) -> list[LedgerEntry]:
     return out
 
 
+def tip_hash_from_text(text: str) -> str:
+    """Return the ``h`` field of the last non-empty ledger line, or ``""``.
+
+    Used by the writer to continue the chain from the file tip. Unlike
+    :func:`verify_ledger_chain_text`, this does **not** require the prefix to
+    be valid — a broken earlier line must not reset later appends to genesis.
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    try:
+        _, tip = parse_ledger_line(lines[-1])
+    except ValueError:
+        return ""
+    return tip or ""
+
+
+def _tip_hash_from_handle(file_handle: TextIO) -> str:
+    """Read tip hash from an in-memory or seekable text handle."""
+    getvalue = getattr(file_handle, "getvalue", None)
+    if callable(getvalue):
+        return tip_hash_from_text(getvalue())
+    try:
+        pos = file_handle.tell()
+        file_handle.seek(0)
+        text = file_handle.read()
+        file_handle.seek(pos)
+        return tip_hash_from_text(text)
+    except (OSError, ValueError):
+        return ""
+
+
+@contextmanager
+def _exclusive_lock(lock_path: Path) -> Iterator[None]:
+    """Cross-platform exclusive lock via a sidecar ``.lock`` file."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            while True:
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.01)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
 def append_ledger_entry(
     path: str | Path,
     model: str,
@@ -233,9 +307,15 @@ def append_ledger_entry(
 ) -> str:
     """Append one hash-chained entry to a ledger file.
 
-  Best-effort helper mirroring :func:`openrouter_client._ledger_append` but
-  usable from tests and scripts. When ``file_handle`` is provided, writes to
-  that handle instead of opening ``path`` (for in-memory testing).
+    Best-effort helper mirroring :func:`openrouter_client._ledger_append` but
+    usable from tests and scripts. When ``file_handle`` is provided, writes to
+    that handle instead of opening ``path`` (for in-memory testing) and derives
+    ``prev_hash`` from the handle's current contents.
+
+    On disk, the tip is read under an exclusive sidecar lock so concurrent
+    OpenRouter writers share one chain tip. The writer always links to the
+    **last line's** ``h``, even if an earlier line fails verification — resetting
+    to genesis after a break permanently fragments the ledger.
 
     Args:
         path: Ledger file path (read for previous hash unless handle given).
@@ -247,27 +327,28 @@ def append_ledger_entry(
     Returns:
         The new entry hash ``h``.
     """
-    prev_hash = ""
     p = Path(path)
-    if p.exists():
-        try:
-            text = p.read_text(encoding="utf-8")
-            valid, _, _ = verify_ledger_chain_text(text)
-            if valid and text.strip():
-                last_line = [ln for ln in text.splitlines() if ln.strip()][-1]
-                _, prev_hash_val = parse_ledger_line(last_line)
-                prev_hash = prev_hash_val or ""
-        except (OSError, ValueError):
-            prev_hash = ""
 
-    line = format_ledger_line(model, prompt_tokens, completion_tokens, prev_hash=prev_hash)
-    digest = json.loads(line)["h"]
     if file_handle is not None:
+        prev_hash = _tip_hash_from_handle(file_handle)
+        line = format_ledger_line(model, prompt_tokens, completion_tokens, prev_hash=prev_hash)
+        digest = json.loads(line)["h"]
         file_handle.write(line + "\n")
-    else:
+        return digest
+
+    lock_path = Path(str(p) + ".lock")
+    with _exclusive_lock(lock_path):
+        prev_hash = ""
+        if p.exists():
+            try:
+                prev_hash = tip_hash_from_text(p.read_text(encoding="utf-8"))
+            except OSError:
+                prev_hash = ""
+        line = format_ledger_line(model, prompt_tokens, completion_tokens, prev_hash=prev_hash)
+        digest = json.loads(line)["h"]
         with open(p, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
-    return digest
+        return digest
 
 
 def summarize_token_usage(entries: list[LedgerEntry]) -> dict[str, tuple[int, int, int]]:

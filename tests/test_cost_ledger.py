@@ -173,6 +173,51 @@ def test_append_ledger_entry_builds_chain_on_disk(tmp_path):
     assert err == ""
 
 
+def test_append_continues_from_last_line_after_broken_prefix(tmp_path):
+    """Regression: a broken earlier line must not reset later appends to genesis.
+
+    After #87/#88, append only linked when the *entire* chain verified. One race
+    (or tamper) then made every subsequent write a new genesis, so cost_report
+    and pack_submission could never recover a usable chain tip.
+    """
+    path = tmp_path / "ledger.jsonl"
+    first = CL.format_ledger_line("qwen3.5-35b-a3b", 1, 1, prev_hash="")
+    first_h = json.loads(first)["h"]
+    # Deliberately broken second line (wrong hash) — chain no longer verifies.
+    broken = '{"m":"minimax-m3","p":2,"c":2,"h":"' + ("0" * 64) + '"}'
+    path.write_text(first + "\n" + broken + "\n", encoding="utf-8")
+    assert CL.verify_ledger_chain(path)[0] is False
+
+    third_h = CL.append_ledger_entry(path, "deepseek-v4-flash", 3, 3)
+    tip_before_third = CL.tip_hash_from_text(broken)
+    assert tip_before_third == "0" * 64
+    expected = CL.ledger_entry_hash(tip_before_third, "deepseek-v4-flash", 3, 3)
+    assert third_h == expected
+    # Must NOT be a genesis hash (prev_hash="").
+    assert third_h != CL.ledger_entry_hash("", "deepseek-v4-flash", 3, 3)
+    # Tip still advances from the last written line.
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 3
+    assert json.loads(lines[0])["h"] == first_h
+    assert json.loads(lines[-1])["h"] == third_h
+
+
+def test_append_via_file_handle_builds_verifiable_chain():
+    buf = StringIO()
+    h1 = CL.append_ledger_entry("unused.jsonl", "qwen3.5-35b-a3b", 10, 5, file_handle=buf)
+    h2 = CL.append_ledger_entry("unused.jsonl", "minimax-m3", 3, 7, file_handle=buf)
+    assert h2 == CL.ledger_entry_hash(h1, "minimax-m3", 3, 7)
+    valid, count, err = CL.verify_ledger_chain_text(buf.getvalue())
+    assert valid is True
+    assert count == 2
+    assert err == ""
+
+
+def test_tip_hash_from_text_returns_empty_for_blank():
+    assert CL.tip_hash_from_text("") == ""
+    assert CL.tip_hash_from_text("\n\n") == ""
+
+
 def test_read_ledger_entries_preserves_order(tmp_path):
     path = _write_chain(
         tmp_path,

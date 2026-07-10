@@ -49,27 +49,42 @@ class Conductor(Protocol):
     ) -> Proposal: ...
 
 
-def _worker_menu(worker_names: list[str]) -> str:
+def _worker_menu(worker_names: list[str], *, allow_self: bool = True) -> str:
     lines = [f"  {i}: {name}" for i, name in enumerate(worker_names)]
-    lines.append(f"  {len(worker_names)}: yourself (recursive sub-workflow)")
+    if allow_self:
+        lines.append(f"  {len(worker_names)}: yourself (recursive sub-workflow)")
     return "\n".join(lines)
 
 
 def build_prompt(
-    task: Task, worker_names: list[str], *, max_steps: int = MAX_STEPS
+    task: Task,
+    worker_names: list[str],
+    *,
+    max_steps: int = MAX_STEPS,
+    allow_self: bool = True,
 ) -> list[dict]:
     """Chat messages instructing a model to emit a parseable workflow.
 
     The format described here is exactly what :func:`trinity.fugu.workflow.parse_workflow`
     accepts, so a well-behaved model's output passes the parse-gate.
+
+    Args:
+        task: The query to route.
+        worker_names: The worker menu, in index order.
+        max_steps: Cap advertised to the model.
+        allow_self: Whether the self index (``len(worker_names)``) may be routed to.
+            ``propose_and_run`` parses with ``allow_self=(max_depth > 0)``, so when
+            recursion is disabled the self index is REJECTED by the parse-gate.
+            Advertising it anyway would instruct the model to emit a workflow that
+            is guaranteed to fail, which is a parse-gate false reject. Pass the same
+            value the parse-gate will use.
     """
-    n = len(worker_names)
     system = (
         "You are the Conductor: you orchestrate a pool of worker LLMs to solve a "
         "problem. You do NOT solve it yourself; you design a short workflow and "
         "assign each step to a worker.\n\n"
         "Available workers (by index):\n"
-        f"{_worker_menu(worker_names)}\n\n"
+        f"{_worker_menu(worker_names, allow_self=allow_self)}\n\n"
         f"Design a workflow of 1 to {max_steps} steps. Output EXACTLY three Python "
         "lists of equal length and NOTHING else:\n"
         "  model_id    = [..]   # worker index for each step\n"
@@ -77,9 +92,13 @@ def build_prompt(
         "  access_list = [..]   # for each step: [] for none, \"all\", or a list of\n"
         "                       # earlier step indices whose outputs that step may read\n"
         "Rules: indices in access_list must be strictly smaller than the step's own "
-        "index. The LAST step must produce the final answer in the required format. "
-        f"Worker index {n} means call yourself recursively on a sub-problem."
+        "index. The LAST step must produce the final answer in the required format."
     )
+    if allow_self:
+        system += (
+            f" Worker index {len(worker_names)} means call yourself recursively "
+            "on a sub-problem."
+        )
     user = f"Benchmark: {task.benchmark}\nProblem:\n{task.prompt}\n\nEmit the three lists."
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -89,12 +108,17 @@ class PromptedConductor:
 
     def __init__(self, pool, model: str, *, max_steps: int = MAX_STEPS,
                  sample_temperature: float = 0.7, greedy_temperature: float = 0.2,
-                 max_tokens: int = 1600, reasoning: str | None = "none"):
+                 max_tokens: int = 1600, reasoning: str | None = "none",
+                 allow_self: bool = True):
         self.pool = pool
         self.model = model
         self.max_steps = max_steps
         self.sample_temperature = sample_temperature
         self.greedy_temperature = greedy_temperature
+        # Must match the parse-gate: propose_and_run uses allow_self=(max_depth > 0).
+        # Advertising the self index when it will be rejected instructs the model to
+        # emit a workflow that cannot pass the gate.
+        self.allow_self = bool(allow_self)
         # The Conductor emits the three lists DIRECTLY; a reasoning model that
         # spends its token budget on chain-of-thought gets truncated before the
         # lists appear (a parse-gate false reject). Default to no reasoning and a
@@ -107,7 +131,9 @@ class PromptedConductor:
         sample: bool = False, rng=None, client=None,
     ) -> Proposal:
         del rng  # temperature controls exploration for the prompted baseline
-        messages = build_prompt(task, worker_names, max_steps=self.max_steps)
+        messages = build_prompt(
+            task, worker_names, max_steps=self.max_steps, allow_self=self.allow_self
+        )
         temp = self.sample_temperature if sample else self.greedy_temperature
         kwargs = dict(temperature=temp, max_tokens=self.max_tokens)
         if self.reasoning is not None:

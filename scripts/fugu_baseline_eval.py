@@ -57,7 +57,9 @@ async def _run(args) -> int:
     pool = OpenRouterPool(args.models)
     pool_models = list(pool.models)
     conductor = PromptedConductor(
-        pool, args.conductor_model, max_tokens=args.conductor_max_tokens
+        pool, args.conductor_model, max_tokens=args.conductor_max_tokens,
+        # The eval parses with allow_self=(max_depth > 0); keep the prompt in sync.
+        allow_self=(args.max_depth > 0),
     )
     tasks = _load_tasks(args)
     prices = price_table(args.conductor_model, conductor_local=False)

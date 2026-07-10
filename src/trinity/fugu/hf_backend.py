@@ -390,7 +390,12 @@ class HFPolicyBackend:
         return out.loss.to(torch.float32), int(valid.item())
 
     def _prompt_text(self, task: Task) -> str:
-        messages = build_prompt(task, self.worker_names)
+        # `constrained_allow_self` is documented "keep in sync with max_depth > 0",
+        # which is the value the parse-gate uses, so the prompt must not advertise
+        # the self index when it is False.
+        messages = build_prompt(
+            task, self.worker_names, allow_self=self.cfg.constrained_allow_self
+        )
         return (
             _chat_text(self.tokenizer, messages, add_generation_prompt=True)
             + self.cfg.proposal_prefix

@@ -53,6 +53,52 @@ def _resolve_x0(args, spec) -> np.ndarray:
     return theta
 
 
+def build_summary(
+    *,
+    benchmark: str,
+    pool_models: list[str],
+    n_total: int,
+    popsize: int,
+    m_cma: int,
+    generations: int,
+    best_fitness: float,
+    seed: int,
+    run_dir: Path | str,
+) -> dict:
+    """Assemble the ``summary.json`` payload for a finished training run.
+
+    ``seed`` is recorded because it drives every source of randomness in the run
+    — task sampling, the sep-CMA-ES trajectory, and the per-generation RNG — and
+    a submission receipt cannot name the seed behind its fitness curve without it
+    (issue #109).
+
+    Args:
+        benchmark: Benchmark the head was trained on.
+        pool_models: Coordinated LLM pool, in slot order.
+        n_total: Search dimension of the parameter vector.
+        popsize: sep-CMA-ES population size λ.
+        m_cma: Replications per candidate.
+        generations: Generations actually completed.
+        best_fitness: Fitness of the best candidate seen.
+        seed: The run's ``--seed``.
+        run_dir: Directory holding the run artifacts.
+
+    Returns:
+        The summary mapping, JSON-serialisable as written to ``summary.json``.
+    """
+    return {
+        "benchmark": benchmark,
+        "pool": pool_models,
+        "n_total": int(n_total),
+        "popsize": int(popsize),
+        "m_cma": int(m_cma),
+        "generations": int(generations),
+        "best_fitness": float(best_fitness),
+        "seed": int(seed),
+        "run_dir": str(run_dir),
+    }
+
+
 async def train(args) -> dict:
     cfg = _load_yaml(args.config)
     cc = cfg["coordinator"]
@@ -165,16 +211,17 @@ async def train(args) -> dict:
 
     best_x, best_f = es.best()
     np.save(run_dir / "best_theta.npy", best_x)
-    summary = {
-        "benchmark": args.benchmark,
-        "pool": pool_models,
-        "n_total": spec.n_total,
-        "popsize": es.popsize,
-        "m_cma": m_cma,
-        "generations": gen,
-        "best_fitness": float(best_f),
-        "run_dir": str(run_dir),
-    }
+    summary = build_summary(
+        benchmark=args.benchmark,
+        pool_models=pool_models,
+        n_total=spec.n_total,
+        popsize=es.popsize,
+        m_cma=m_cma,
+        generations=gen,
+        best_fitness=best_f,
+        seed=args.seed,
+        run_dir=run_dir,
+    )
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print(f"[train] DONE. best_fitness={best_f:.4f}  -> {run_dir}")
     return summary

@@ -88,6 +88,36 @@ def task_rng(seed: int, task_id: str) -> random.Random:
     return random.Random(f"{seed}:{task_id}")
 
 
+def single_model_budget(max_tokens: int, max_turns: int) -> int:
+    """Token budget for one single-model baseline turn, matched to TRINITY's total.
+
+    SPEC §1.3.4 requires the R1/R2 baselines to be **budget-matched**: *"run each
+    single model at max_tokens = 20,480 (5x) so the single-vs-TRINITY comparison is
+    fair, matching the paper's 5x protocol."*
+
+    TRINITY may spend ``max_tokens`` on each of up to ``max_turns`` turns, so a
+    single model answering in one turn is given that same total. Deriving the
+    multiplier from ``max_turns`` (rather than hard-coding 5) keeps the comparison
+    matched if ``--max-turns`` is changed.
+
+    Args:
+        max_tokens: Per-turn token cap (``--max-tokens``).
+        max_turns: Maximum TRINITY turns (``--max-turns``).
+
+    Returns:
+        The single-model baseline's ``max_tokens``. At the defaults: ``5 * 4096 =
+        20,480``.
+
+    Raises:
+        ValueError: If either argument is not positive.
+    """
+    if max_tokens < 1:
+        raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
+    if max_turns < 1:
+        raise ValueError(f"max_turns must be >= 1, got {max_turns}")
+    return int(max_tokens) * int(max_turns)
+
+
 def _reduce_scores(scores: list, *, label: str) -> float:
     """Average per-task scores, counting a failed trajectory as ``0.0``.
 
@@ -185,12 +215,22 @@ async def evaluate(args) -> dict:
     print(f"[eval] benchmark={args.benchmark}  {len(tasks)} test tasks  pool={pool_models}")
     run_kwargs = dict(max_turns=args.max_turns, max_tokens=args.max_tokens, reasoning=args.reasoning)
 
+    # SPEC §1.3.4: the single-model baselines must be BUDGET-MATCHED to TRINITY, or
+    # R1/R2 ("TRINITY beats the best single model") is decided by token budget
+    # rather than by routing. TRINITY may spend `max_tokens` on each of `max_turns`
+    # turns, so a single model gets that same total in its one turn -- 5 x 4096 =
+    # 20,480 at the defaults, which is the paper's 5x protocol.
+    single_max_tokens = single_model_budget(args.max_tokens, args.max_turns)
+    print(f"[eval] budget-matched baselines: single-model max_tokens="
+          f"{single_max_tokens} ({args.max_turns}x {args.max_tokens})")
+
     results: dict[str, float] = {}
 
     # --- single-model baselines (R1/R2) ---
     for m in pool_models:
         reps = [await _score_single_model(tasks, pool, m, adapter,
-                                          max_tokens=args.max_tokens, reasoning=args.reasoning)
+                                          max_tokens=single_max_tokens,
+                                          reasoning=args.reasoning)
                 for _ in range(max(1, args.single_reps))]
         s = float(mean(reps))
         results[f"single::{m}"] = s

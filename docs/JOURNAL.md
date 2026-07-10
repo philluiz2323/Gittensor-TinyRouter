@@ -37,6 +37,85 @@ lives in ``trinity.llm.openrouter_pricing`` so ``cost_report.py``,
 **Follow-up:** wire the preflight CLI into CONTRIBUTING/SUBMITTING docs when the
 maintainer is ready to advertise it.
 
+---
+
+## 2026-07-10 — R1/R2 gave TRINITY 5x the token budget of the baselines it beat  #mistake #gotcha
+**Context:** auditing `trinity/eval.py` against SPEC §1.3 before trusting an R1/R2 verdict.
+**Expected:** the single-model baselines are budget-matched to TRINITY, as SPEC §1.3.4 requires: *"run each single model at `max_tokens = 20,480` (5×) so the single-vs-TRINITY comparison is fair, matching the paper's 5× protocol."* The same 5× appears in the 2026-06-22 SPEC-decisions entry and in SPEC's own R1 row (*"budget-matched 5×"*).
+**Actual:** the baselines got **1×**. `evaluate` passed `max_tokens=args.max_tokens` (default 4096) to `_score_single_model`, which spends it on **one** turn. TRINITY got `run_kwargs = dict(max_turns=5, max_tokens=4096)` — up to 5 turns at 4096 each, i.e. 20,480. So every "TRINITY > best single model" result was produced by a system with five times the token budget of the systems it was compared against.
+**Root cause:** the budget rule lives in `--max-turns`, not in `--max-tokens`, so "give the baseline the same total" requires multiplying the two — and the one place that had to do the multiplication simply forwarded `args.max_tokens` to both paths. Both numbers look right in isolation. Nothing in the code referenced the 5×, so nothing enforced it; the constraint existed only in prose, in two documents.
+**Fix / decision:** add `single_model_budget(max_tokens, max_turns) -> max_tokens * max_turns` and hand its result to the baselines. Derived from `max_turns` rather than hard-coding `5`, so the match survives someone passing `--max-turns 3`; at the defaults it is exactly the 20,480 SPEC names. The routed path is untouched — TRINITY still spends `max_tokens` *per turn*. `evaluate` now prints the matched budget, so a reader of the logs can see the comparison was fair rather than trusting that it was.
+**Why this one stings:** R1/R2 is the paper's headline claim and the repo's reason to exist. The invariant check at the bottom of `evaluate` (`s_trinity > best_single`) was measuring, in part, a budget difference. Every R1/R2 number in this JOURNAL predating this fix was produced under the 1× baseline and should be read with that in mind — including the 2026-06-23 multi-task headline (*"best FIXED single model avg ≈ 0.65 … per-task TRINITY avg ≈ 0.75"*). Re-running eval is cheap (the JOURNAL prices it at ~$1.3); the numbers should be regenerated before any of them are quoted.
+**Follow-up:** `scripts/audit_eval.py` builds its own `single::` baselines and needs the same treatment; `pr_eval.py`'s cached single-turn component is a separate contract (it caches one WORKER turn per question) and is deliberately not changed here.
+
+---
+
+## 2026-07-10 — Verifier verdicts missed when the model wraps them in Markdown  #mistake #finding #decision
+
+**Context:** `roles/verifier.py::parse_verdict` extracts `VERDICT: ACCEPT|REVISE`
+from the Verifier turn; an ACCEPT terminates the trajectory early (SPEC §0.3.5).
+The regex was recently anchored with a trailing `\b` (good — stops `ACCEPTABLE`).
+**Expected:** a verdict still parses when the model emphasises it.
+**Actual:** it did not. Models routinely format the line as `**VERDICT:** ACCEPT`,
+`VERDICT: **ACCEPT**`, or ``VERDICT: `REVISE` ``, and `VERDICT:\s*(ACCEPT|REVISE)`
+requires the colon then only whitespace before the word — so all three returned
+`None`, the loop fail-safed to REVISE, and a correct+complete answer never earned
+the early ACCEPT. That needlessly runs the full turn budget, hurting the
+efficiency term (10% of the competition score) and raising live-eval latency/cost.
+**Root cause:** the separator between `VERDICT` and the verdict word only allowed
+whitespace, not Markdown emphasis / code / dash markers.
+**Fix / decision:** broaden the separator to `[\s:*_`~-]*` and replace the trailing
+`\b` with `(?![A-Za-z])`. The lookahead is needed because `\b` treats an underscore
+as a word char and would reject the italic wrapper `__REVISE__`; the lookahead
+blocks only a trailing *letter*, so the `ACCEPTABLE`/`ACCEPTED`/`REVISED` guard is
+preserved while `**`/`__`/`` ` ``/punctuation are fine. The character class matches
+no letters, so prose ("the verdict is … accept") is still rejected. Covered by new
+cases in `tests/test_verifier.py`.
+**Follow-up:** none.
+
+## 2026-07-10 — results_table multi-task summary crashed on a null system score  #mistake #gotcha
+
+**Context:** `scripts/results_table.py` aggregates `experiments/**/eval*.json` into
+the R1/R2/R4 summary. `load_rows` keeps a row when the `TRINITY` and `single::` keys
+are PRESENT.
+**Expected:** the summary renders for any row set `load_rows` accepts.
+**Actual:** `trin_avg = sum(max(r["trinity"] for r in by_bench[b]) ...)` (and the
+`random` twin) raise `TypeError: ... 'float' and 'NoneType'` when a row has
+`"TRINITY": null` (or lacks `random_routing`) — key present but value `None`. Key
+*presence* was checked; value *nullness* was not, so an older/partially-written
+eval file crashes the whole summary.
+**Root cause:** the per-benchmark reduction assumed every value non-null, unlike the
+per-row table which already guards with `x or 0`.
+**Fix / decision:** add `_bench_best(rows, key)` that maxes over non-null values
+(0.0 if a benchmark has none), and route both `trin_avg`/`rand_avg` through it —
+mirroring the per-row leniency. Covered by a null-score case in
+`tests/test_results_table.py`; the existing reduce-the-same-way tests are unchanged.
+**Follow-up:** none.
+
+## 2026-07-10 — GPQA logical `test` resolved via a deterministic holdout  #finding #decision
+
+**Context:** closing the follow-up left by the MMLU split fix below — "GPQA still has only an
+upstream `train` split; deterministic holdout for logical `test` is separate work" (issue #95).
+**Expected:** `python -m trinity.eval --benchmark gpqa` scores the router on real GPQA-Diamond
+rows that training never saw.
+**Actual:** it scored on **2 toy questions**. `eval.py` asks for split `"test"`; `Idavidrein/gpqa`
+publishes only `train`; `_try_load_hf` swallowed the unknown-split error and `load_split`
+substituted `_toy_tasks("gpqa")`. Training (`split="train"`) loaded the real 198 rows, so train
+and eval were silently running on different data and the R1/R2 verdicts rested on 2 questions.
+**Root cause:** `split_policy._SPLIT_ALIASES` had entries for `mmlu` (#35) and `mmlu_pro` (#50)
+but none for `gpqa`, so the logical split was forwarded verbatim.
+**Fix / decision:** alias both `train` and `test` onto upstream `train`, then partition those rows
+with `split_policy.select_holdout` — a fixed-seed (`HOLDOUT_SEED = 20260710`), 25% holdout keyed on
+upstream row position. `[OUR CHOICE]` a plain `test → train` alias was rejected: it would have
+evaluated on exactly the rows training consumed. The partition is deliberately independent of
+`load_split`'s shuffle `seed`, so the train/test boundary cannot drift when a caller changes
+sampling. 198 rows → 148 train / 50 test, disjoint and covering. The toy fallback skips the
+partition (a 2-item set cannot be divided) and still raises `ToyFallbackWarning`.
+**Follow-up:** `eval.py` treats `ToyFallbackWarning` as non-fatal, so any *other* loader failure
+still reports toy-set numbers as if real. Promoting that warning to an error under `--strict-data`
+would close the class rather than this one instance. GPQA is also a gated HF repo — without auth
+the fallback still fires, now loudly but not fatally.
+
 ## 2026-07-10 — Cost-ledger verifier hashed a different JSON string than the writer  #mistake #decision
 **Context:** checking the token-cost ledger path used by training, `cost_report.py`,
 and submission packing.

@@ -80,7 +80,8 @@ def _ledger_append(model: str, prompt_tokens: int, completion_tokens: int) -> No
     it before reporting totals.
 
     Used by scripts/cost_report.py to compute exact spend. Append-only JSONL,
-    one short line per call (atomic enough for concurrent training processes).
+    one short line per call. Disk appends take an exclusive sidecar lock around
+    read-tip + write so concurrent training processes share one chain tip.
     Best-effort: never let cost bookkeeping break an inference call.
     """
     path = os.environ.get("TRINITY_COST_LEDGER")

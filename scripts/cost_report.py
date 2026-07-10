@@ -28,6 +28,7 @@ from trinity.llm.openrouter_pricing import (
     token_cost,
 )
 
+# Back-compat alias for scripts/tests that import PRICES from cost_report.
 PRICES = OPENROUTER_POOL_PRICES
 _DEFAULT_BLENDED_IN, _DEFAULT_BLENDED_OUT = default_blended_rates()
 
