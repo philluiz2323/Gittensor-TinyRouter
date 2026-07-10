@@ -24,7 +24,7 @@ from typing import Any
 
 from trinity.types import Task
 
-from .split_policy import resolve_split, warn_on_toy_fallback
+from .split_policy import resolve_split, select_holdout, warn_on_toy_fallback
 
 #: Benchmarks with a dedicated raw loader in this module.
 SUPPORTED_BENCHMARKS: tuple[str, ...] = ("math500", "mmlu", "gpqa", "livecodebench")
@@ -449,10 +449,15 @@ def load_split(
 
     logical_split = (split or "test").strip().lower()
     resolved_split = resolve_split(key, logical_split)
-    tasks = _HF_LOADERS[key](resolved_split)
-    used_toy = not tasks
-    if used_toy:
+    loaded = _HF_LOADERS[key](resolved_split)
+    used_toy = not loaded
+    if not loaded:
         tasks = _toy_tasks(key)
+    else:
+        # Single-split benchmarks (GPQA) serve both logical splits from one
+        # upstream split; carve them apart deterministically. Pass-through for
+        # every benchmark that publishes its own test split.
+        tasks = select_holdout(key, logical_split, loaded)
     warn_on_toy_fallback(key, logical_split, used_toy=used_toy)
 
     rng = random.Random(seed)

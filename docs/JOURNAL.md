@@ -18,6 +18,30 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — GPQA logical `test` resolved via a deterministic holdout  #finding #decision
+
+**Context:** closing the follow-up left by the MMLU split fix below — "GPQA still has only an
+upstream `train` split; deterministic holdout for logical `test` is separate work" (issue #95).
+**Expected:** `python -m trinity.eval --benchmark gpqa` scores the router on real GPQA-Diamond
+rows that training never saw.
+**Actual:** it scored on **2 toy questions**. `eval.py` asks for split `"test"`; `Idavidrein/gpqa`
+publishes only `train`; `_try_load_hf` swallowed the unknown-split error and `load_split`
+substituted `_toy_tasks("gpqa")`. Training (`split="train"`) loaded the real 198 rows, so train
+and eval were silently running on different data and the R1/R2 verdicts rested on 2 questions.
+**Root cause:** `split_policy._SPLIT_ALIASES` had entries for `mmlu` (#35) and `mmlu_pro` (#50)
+but none for `gpqa`, so the logical split was forwarded verbatim.
+**Fix / decision:** alias both `train` and `test` onto upstream `train`, then partition those rows
+with `split_policy.select_holdout` — a fixed-seed (`HOLDOUT_SEED = 20260710`), 25% holdout keyed on
+upstream row position. `[OUR CHOICE]` a plain `test → train` alias was rejected: it would have
+evaluated on exactly the rows training consumed. The partition is deliberately independent of
+`load_split`'s shuffle `seed`, so the train/test boundary cannot drift when a caller changes
+sampling. 198 rows → 148 train / 50 test, disjoint and covering. The toy fallback skips the
+partition (a 2-item set cannot be divided) and still raises `ToyFallbackWarning`.
+**Follow-up:** `eval.py` treats `ToyFallbackWarning` as non-fatal, so any *other* loader failure
+still reports toy-set numbers as if real. Promoting that warning to an error under `--strict-data`
+would close the class rather than this one instance. GPQA is also a gated HF repo — without auth
+the fallback still fires, now loudly but not fatally.
+
 ## 2026-07-10 — `main` went red: cache-prompt test not updated for the `_cache_answers` refactor  #mistake #gotcha
 
 **Context:** two changes landed close together — the cache-prompt fix (which added
