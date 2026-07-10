@@ -166,7 +166,13 @@ def crossfit_oracle_and_best(
 
     rng = np.random.default_rng(seed)
     n_a = K // 2  # selection-half size
-    jitter = np.linspace(0.0, 1e-9, M)
+    # Deterministic tie-break favouring model 0: a DECREASING ramp, so on an
+    # argmax tie the lowest-indexed model wins — matching this function's
+    # docstring and numpy's own argmax convention. An increasing ramp would
+    # instead hand every tie to the LAST model, biasing the cross-fit oracle by
+    # pool order (selection-half ties are common at low K, where n_a = K//2 makes
+    # sel land on a coarse grid).
+    jitter = np.linspace(1e-9, 0.0, M)
 
     oracle_tot = np.zeros(n_splits)
     best_tot = np.zeros(n_splits)

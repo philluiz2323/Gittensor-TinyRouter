@@ -18,6 +18,30 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — Cross-fit oracle tie-break favoured the LAST model, not model 0  #mistake #decision
+
+**Context:** reading `scripts/oracle_ceiling.crossfit_oracle_and_best` while checking the
+routing-headroom diagnostic that backs the R1/R2 verdict (issue #126).
+**Expected:** on an argmax tie over the selection half, the oracle picks model 0 — the
+docstring says "Argmax ties are broken by a tiny deterministic per-model jitter (model 0
+favoured)", and numpy's own `argmax` returns the lowest index on exact ties.
+**Actual:** it picked the LAST model. `jitter = np.linspace(0.0, 1e-9, M)` is an *increasing*
+ramp, so `argmax(sel + jitter)` adds the largest nudge to the highest index and overrides
+numpy's natural lowest-index tie-break.
+**Root cause:** wrong ramp direction. The jitter was meant to make near-ties deterministic
+while preserving model-0 preference, but increasing it inverts that preference.
+**Fix / decision:** `jitter = np.linspace(1e-9, 0.0, M)` (decreasing), so ties go to model 0 as
+documented. `[OUR CHOICE]` fix the code, not the docstring: model-0 is both the stated intent and
+numpy's convention. This is load-bearing, not cosmetic — selection-half ties are frequent at low
+K (`n_a = K//2` makes `sel` land on a coarse grid like {0, 0.5, 1}), and every tie was silently
+routed to the last-indexed pool model, injecting a pool-ordering bias into `routing_oracle` /
+`routing_headroom`. On a constructed tie-heavy input the raw oracle read 0.506 vs the correct
+1.0.
+**Follow-up:** the tie-break still favours a fixed index, which is fine for determinism but means
+the *raw* oracle is not pool-order-invariant on ties; `compute_stats` already floors the oracle at
+the cross-fit best_single, which masks most of the residual. A fully order-invariant tie-break
+(e.g. average over tied models) would be a larger change, deferred.
+
 ## 2026-07-10 — R1/R2 gave TRINITY 5x the token budget of the baselines it beat  #mistake #gotcha
 **Context:** auditing `trinity/eval.py` against SPEC §1.3 before trusting an R1/R2 verdict.
 **Expected:** the single-model baselines are budget-matched to TRINITY, as SPEC §1.3.4 requires: *"run each single model at `max_tokens = 20,480` (5×) so the single-vs-TRINITY comparison is fair, matching the paper's 5× protocol."* The same 5× appears in the 2026-06-22 SPEC-decisions entry and in SPEC's own R1 row (*"budget-matched 5×"*).
