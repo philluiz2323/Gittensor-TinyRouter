@@ -307,9 +307,20 @@ def load_swebench_tasks(split: str, max_items: int | None, seed: int = 0) -> lis
 # Adapter
 # --------------------------------------------------------------------------- #
 class SweBenchAdapter(BenchmarkAdapter):
-    """SWE-bench Verified: repository-issue in, unified-diff patch out."""
+    """SWE-bench Verified: repository-issue in, unified-diff patch out.
+
+    ``repo_provider`` opts into real execution: a context-manager factory
+    ``(reference) -> ContextManager[repo_dir]`` yielding a work-tree checked out at
+    the instance's ``base_commit`` (e.g. :func:`trinity.adapters.swebench_runner.prepare_repo`).
+    When set, :meth:`score_output` grades the patch through the sandboxed runner
+    (#18); when ``None`` (the default) it uses the cheap exact-match placeholder,
+    so the adapter stays offline and network-free out of the box.
+    """
 
     name = BENCHMARK
+
+    def __init__(self, *, repo_provider=None):
+        self._repo_provider = repo_provider
 
     def load_tasks(self, split: str, max_items: int | None, seed: int = 0) -> list[Task]:
         return load_swebench_tasks(split, max_items, seed=seed)
@@ -318,7 +329,13 @@ class SweBenchAdapter(BenchmarkAdapter):
         return task.prompt
 
     def score_output(self, output: str, reference: Any) -> float:
-        return score_patch(output, reference)
+        if self._repo_provider is None:
+            return score_patch(output, reference)
+        # Execute the patch in a sandboxed, prepared work-tree via the runner.
+        from .swebench_runner import evaluate_patch
+
+        with self._repo_provider(reference) as repo_dir:
+            return evaluate_patch(repo_dir, output, reference).reward
 
     def scoring_modes(self) -> frozenset[ScoringMode]:
         # SWE-bench supports BOTH: a cheap cached exact-match (score_cached ->
