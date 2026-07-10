@@ -257,7 +257,13 @@ async def evaluate_candidate(
     ``fitness_cfg`` selects binary vs shaped per-task reward; ``None`` -> defaults
     (plain binary, original behavior).
     """
-    cfg = fitness_cfg or FitnessConfig()
+    # ``None`` means "no shaping": zero the bonuses rather than taking
+    # FitnessConfig()'s field defaults, which are the *configured* shaping values
+    # (format_bonus=turn_penalty=0.05) and would silently make the documented
+    # plain-binary path shaped. Training always passes an explicit cfg.
+    cfg = fitness_cfg if fitness_cfg is not None else FitnessConfig(
+        format_bonus=0.0, turn_penalty=0.0
+    )
     policy.configure(theta, spec)
 
     own_client = False
@@ -338,7 +344,11 @@ async def evaluate_population(
     """
     import time
 
-    cfg = fitness_cfg or FitnessConfig()
+    # See evaluate_candidate: ``None`` -> plain binary, not FitnessConfig()'s
+    # configured shaping defaults.
+    cfg = fitness_cfg if fitness_cfg is not None else FitnessConfig(
+        format_bonus=0.0, turn_penalty=0.0
+    )
 
     fits: list[float] = []
     per_task_rows: list[np.ndarray] = []
