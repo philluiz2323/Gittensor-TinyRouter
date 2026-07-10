@@ -353,6 +353,16 @@ def _record_attempt(benchmark: str, miner_name: str, generation: int,
         bench_entry["attempts"] = [
             dict(entry) for entry in bench_entry.get("history", [])
         ]
+    # Idempotent per PR: a re-run of the same PR (CI retry, transient failure
+    # after this point on a prior run) must not append a second attempt and
+    # inflate the miner's weekly count. A distinct PR always records.
+    already = any(
+        e.get("miner") == miner_name and e.get("pr") == pr_number
+        for e in bench_entry["attempts"]
+    )
+    if already:
+        print(f"[pr_eval] attempt for PR #{pr_number} already recorded; not double-counting")
+        return
     bench_entry["attempts"].append({
         "miner": miner_name,
         "generation": generation,
@@ -428,7 +438,7 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     # GATE 1: Rate Limiting (before any GPU/API work)
     # ══════════════════════════════════════════════════════════════
     lb = _load_leaderboard()
-    err = _check_rate_limit(miner_name, benchmark, lb)
+    err = _check_rate_limit(miner_name, benchmark, lb, current_pr=pr_number)
     if err:
         return _reject(err)
     # Slot consumed even if later gates fail or the score loses — otherwise

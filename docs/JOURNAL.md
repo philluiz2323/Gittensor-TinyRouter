@@ -18,6 +18,30 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — Rate-limit gate self-rejected a re-run of the same PR  #mistake #decision
+
+**Context:** reading the anti-cheat Gate 1 (`submission/gates.check_rate_limit`, called by
+`scripts/pr_eval.py`) after the submission-gate extraction (issue #144).
+**Expected:** the maintainer can re-run `pr_eval` on a PR (a CI retry, or after a transient
+GPU/API failure during live scoring) without it counting as a second submission.
+**Actual:** `_record_attempt` consumes the weekly slot the moment Gate 1 passes ("so rejected
+attempts still count — miners can't probe weekly"). On a re-run, `check_rate_limit` counted that
+already-recorded attempt for the SAME PR (recent = 1 >= max 1) and rejected the PR as
+`rate_limited`. A transient infra failure permanently burned a legitimate miner's slot AND
+bounced their submission.
+**Root cause:** `check_rate_limit` counted every attempt by the miner in the window with no
+notion of "the PR currently under evaluation", even though each attempt already records its `pr`.
+**Fix / decision:** thread the current PR number into `check_rate_limit` and skip attempts whose
+`pr` equals it — a re-eval of one PR no longer counts against itself, while a DISTINCT PR still
+does (anti-probe intent preserved). `_record_attempt` is now idempotent per PR so re-runs don't
+bloat the ledger either. `[OUR CHOICE]` an attempt with no recorded `pr` still counts (it can't be
+proven to be the same PR); `current_pr=None` (local preflight, no PR yet) preserves the old
+count-everything behaviour so a miner sees their true status.
+**Follow-up:** the slot is still consumed on the *first* Gate-1 pass regardless of whether live
+eval ever completes; if an eval reliably dies before producing a score, that PR's slot is spent
+until it either succeeds on re-run or the week rolls over. Acceptable given the anti-probe goal,
+but worth revisiting if infra flakiness makes it common.
+
 ## 2026-07-10 — The hidden-benchmark build accepted toy data, then died pointing elsewhere  #mistake #gotcha #repro
 **Context:** #73 fixed MMLU's `train` split and wired `ToyFallbackWarning` into `load_split`. Checking what the *hidden-benchmark builder* does when that warning fires.
 **Expected:** `build_benchmark.py` refuses to seal a benchmark whose questions came from the 2-item offline toy set.
