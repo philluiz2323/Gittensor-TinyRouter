@@ -22,11 +22,17 @@ _PLACEHOLDER_PATTERNS: tuple[str, ...] = (
 )
 
 _ROUTING_MARKERS: tuple[str, ...] = (
-    "routing head submission",
     "[submission]",
     "head_weights.npy",
     "svf_scales.npy",
     "receipt.json",
+)
+
+# Only a checked routing-head checkbox counts — not the phrase appearing in the
+# shared PR template that every general-improvement PR is told to keep.
+_ROUTING_CHECKED_RE = re.compile(
+    r"-\s*\[x\]\s*\*\*routing head submission\*\*",
+    re.IGNORECASE,
 )
 
 
@@ -47,10 +53,11 @@ def _contains_placeholder(text: str) -> bool:
     return any(re.search(pattern, lower) for pattern in _PLACEHOLDER_PATTERNS)
 
 
-def _routing_submission(body: str) -> bool:
-    lower = body.lower()
-    checked = "- [x]" in lower and "routing head submission" in lower
-    return checked or any(marker in lower for marker in _ROUTING_MARKERS)
+def _routing_submission(body: str, *, title: str = "") -> bool:
+    if _ROUTING_CHECKED_RE.search(body):
+        return True
+    combined = f"{title}\n{body}".lower()
+    return any(marker in combined for marker in _ROUTING_MARKERS)
 
 
 def _general_section_filled(body: str) -> bool:
@@ -89,7 +96,7 @@ def analyze_pr(title: str, body: str, changed_files: list[str]) -> PRAnalysis:
     sensitive, area_labels = analyse_changed_paths(changed_files)
 
     labels = list(area_labels)
-    routing = _routing_submission(body)
+    routing = _routing_submission(body, title=title)
     if routing:
         labels.append("submission")
 

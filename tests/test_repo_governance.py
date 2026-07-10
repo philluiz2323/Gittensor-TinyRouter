@@ -69,3 +69,48 @@ def test_paths_marks_configs_and_leaderboard_as_sensitive():
     assert "leaderboard.json" in sensitive
     assert "configs/trinity.yaml" in sensitive
     assert "area:training" in labels
+
+
+def test_pr_bot_does_not_flag_general_pr_that_keeps_template_routing_text():
+    """Regression for #84: the shared PR template mentions routing-head text."""
+    template = (
+        Path(__file__).resolve().parents[1] / ".github" / "PULL_REQUEST_TEMPLATE.md"
+    ).read_text(encoding="utf-8")
+    body = template.split("## Routing head submission")[0] + (
+        "\n## General improvement\n\n"
+        "**What does this PR do?**\n\n"
+        "Fix the loader split-policy fallback.\n\n"
+        "**Why is it needed?**\n\n"
+        "Training was silently using the toy set.\n"
+    )
+    result = pr_bot.analyze_pr("fix: loader split policy", body, ["src/trinity/adapters/loaders.py"])
+    assert result.is_routing_submission is False
+    assert "submission" not in result.labels
+    assert not any("Routing submission template" in v for v in result.template_violations)
+
+
+def test_pr_bot_detects_checked_routing_submission_checkbox():
+    body = (
+        "## Type\n\n"
+        "- [x] **Routing head submission** — trained head\n\n"
+        "**Benchmark:** math500\n"
+        "**Miner name:** miner-a\n"
+        "**Generation:** 1\n"
+        "**Training method:** CMA-ES\n"
+        "**Training cost:** $25.00\n"
+    )
+    result = pr_bot.analyze_pr("[submission] miner-a gen 1", body, ["submissions/miner-a/1/head_weights.npy"])
+    assert result.is_routing_submission is True
+    assert "submission" in result.labels
+
+
+def test_pr_bot_detects_routing_submission_from_title_tag():
+    body = (
+        "## Type\n\n"
+        "- [x] General improvement\n\n"
+        "## General improvement\n\n"
+        "**What does this PR do?**\n\n"
+        "Docs only.\n"
+    )
+    result = pr_bot.analyze_pr("[submission] miner-a gen 1 — math500", body, ["README.md"])
+    assert result.is_routing_submission is True
