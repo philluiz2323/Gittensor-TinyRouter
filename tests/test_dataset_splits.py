@@ -1,13 +1,17 @@
 """Logical-split resolution and the toy-set fallback contract.
 
-Regression cover for the bug where ``load_tasks("mmlu", "train")`` silently
+Regression cover for the bug where loading MMLU's ``train`` split silently
 returned the 2-item toy set: ``cais/mmlu`` has no ``train`` split, the resulting
 ``load_dataset`` error was swallowed, and the toy set stood in for real data with
 no diagnostic.
 
-Every test here fakes the ``datasets`` module, so the *online* code path is
-exercised without a network. ``_try_load_hf`` imports ``datasets`` lazily, so
-injecting ``sys.modules["datasets"]`` is enough to intercept it.
+Tests target :mod:`trinity.adapters.loaders` -- the canonical "raw-or-toy" path
+shared by every adapter and by the back-compat ``dataset.load_tasks`` shim -- plus
+one end-to-end check through that shim.
+
+Every test fakes the ``datasets`` module, so the *online* code path is exercised
+without a network. ``_try_load_hf`` imports ``datasets`` lazily, so injecting
+``sys.modules["datasets"]`` is enough to intercept it.
 """
 from __future__ import annotations
 
@@ -18,11 +22,12 @@ import warnings
 
 import pytest
 
-from trinity.orchestration.dataset import (
+from trinity.adapters.loaders import (
     ToyFallbackWarning,
     _resolve_split,
-    load_tasks,
+    load_split,
 )
+from trinity.orchestration.dataset import load_tasks
 
 # Split sets the real HuggingFace datasets actually expose, keyed by (path, config).
 _REAL_SPLITS: dict[tuple[str, str | None], set[str]] = {
@@ -104,7 +109,7 @@ def test_mmlu_train_requests_auxiliary_train_split(monkeypatch):
     requested: list[dict[str, object]] = []
     _install_fake_datasets(monkeypatch, requested)
 
-    load_tasks("mmlu", "train", max_items=None, seed=0)
+    load_split("mmlu", "train", max_items=None, seed=0)
 
     assert requested, "expected a load_dataset call"
     assert requested[0]["path"] == "cais/mmlu"
@@ -116,7 +121,7 @@ def test_mmlu_train_returns_real_tasks_not_toy(monkeypatch):
     """The regression: previously these were the two `mmlu-toy-*` tasks."""
     _install_fake_datasets(monkeypatch, [])
 
-    tasks = load_tasks("mmlu", "train", max_items=None, seed=0)
+    tasks = load_split("mmlu", "train", max_items=None, seed=0)
 
     assert len(tasks) == 6
     assert not any(t.task_id.startswith("mmlu-toy") for t in tasks)
@@ -124,11 +129,21 @@ def test_mmlu_train_returns_real_tasks_not_toy(monkeypatch):
     assert all(t.answer in ("A", "B", "C", "D") for t in tasks)
 
 
+def test_mmlu_train_via_public_load_tasks_shim(monkeypatch):
+    """End-to-end through the adapter registry -- the path `train.py` actually uses."""
+    _install_fake_datasets(monkeypatch, [])
+
+    tasks = load_tasks("mmlu", "train", max_items=None, seed=0)
+
+    assert len(tasks) == 6
+    assert not any(t.task_id.startswith("mmlu-toy") for t in tasks)
+
+
 def test_mmlu_train_does_not_warn_when_real_data_loads(monkeypatch):
     _install_fake_datasets(monkeypatch, [])
 
     with _warnings_as_list() as caught:
-        load_tasks("mmlu", "train", max_items=None, seed=0)
+        load_split("mmlu", "train", max_items=None, seed=0)
 
     assert not [w for w in caught if issubclass(w.category, ToyFallbackWarning)]
 
@@ -138,7 +153,7 @@ def test_mmlu_test_still_uses_the_test_split(monkeypatch):
     requested: list[dict[str, object]] = []
     _install_fake_datasets(monkeypatch, requested)
 
-    tasks = load_tasks("mmlu", "test", max_items=None, seed=0)
+    tasks = load_split("mmlu", "test", max_items=None, seed=0)
 
     assert requested[0]["split"] == "test"
     assert not any(t.task_id.startswith("mmlu-toy") for t in tasks)
@@ -149,8 +164,8 @@ def test_mmlu_train_and_test_draw_from_disjoint_splits(monkeypatch):
     requested: list[dict[str, object]] = []
     _install_fake_datasets(monkeypatch, requested)
 
-    load_tasks("mmlu", "train", max_items=None, seed=0)
-    load_tasks("mmlu", "test", max_items=None, seed=0)
+    load_split("mmlu", "train", max_items=None, seed=0)
+    load_split("mmlu", "test", max_items=None, seed=0)
 
     splits = [call["split"] for call in requested]
     assert splits == ["auxiliary_train", "test"]
@@ -163,7 +178,7 @@ def test_toy_fallback_warns_when_datasets_is_unavailable(monkeypatch):
     _install_missing_datasets(monkeypatch)
 
     with pytest.warns(ToyFallbackWarning, match="toy set"):
-        tasks = load_tasks("mmlu", "train", max_items=None, seed=0)
+        tasks = load_split("mmlu", "train", max_items=None, seed=0)
 
     assert all(t.task_id.startswith("mmlu-toy") for t in tasks)
 
@@ -172,7 +187,7 @@ def test_toy_fallback_warning_names_benchmark_and_split(monkeypatch):
     _install_missing_datasets(monkeypatch)
 
     with pytest.warns(ToyFallbackWarning) as record:
-        load_tasks("gpqa", "test", max_items=None, seed=0)
+        load_split("gpqa", "test", max_items=None, seed=0)
 
     message = str(record[0].message)
     assert "'gpqa'" in message
@@ -183,13 +198,13 @@ def test_strict_mode_raises_instead_of_falling_back(monkeypatch):
     _install_missing_datasets(monkeypatch)
 
     with pytest.raises(RuntimeError, match="allow_toy_fallback=False"):
-        load_tasks("mmlu", "train", max_items=None, seed=0, allow_toy_fallback=False)
+        load_split("mmlu", "train", max_items=None, seed=0, allow_toy_fallback=False)
 
 
 def test_strict_mode_is_a_noop_when_real_data_loads(monkeypatch):
     _install_fake_datasets(monkeypatch, [])
 
-    tasks = load_tasks("mmlu", "train", max_items=None, seed=0, allow_toy_fallback=False)
+    tasks = load_split("mmlu", "train", max_items=None, seed=0, allow_toy_fallback=False)
 
     assert len(tasks) == 6
 
@@ -199,7 +214,7 @@ def test_offline_toy_fallback_still_serves_smoke_tests(monkeypatch):
     _install_missing_datasets(monkeypatch)
 
     with pytest.warns(ToyFallbackWarning):
-        tasks = load_tasks("math500", "test", max_items=2, seed=0)
+        tasks = load_split("math500", "test", max_items=2, seed=0)
 
     assert len(tasks) == 2
     assert all(t.benchmark == "math500" for t in tasks)
