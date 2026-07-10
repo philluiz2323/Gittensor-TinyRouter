@@ -28,6 +28,27 @@ For a held-out query set, with `p[q,m]` = probability model `m` solves query `q`
 - `router_gap_closed = (trinity - best_single) / (routing_oracle - best_single)` — how much of the real
   headroom our trained router actually captures.
 
+### Baseline contract for `router_gap_closed` (issue #32)
+
+This ratio is only meaningful when **both** terms in the denominator use the **same estimation
+regime**:
+
+| Term | Must use |
+| --- | --- |
+| `trinity` | TRINITY accuracy on the held-out query set |
+| `best_single` (numerator & denominator) | **Cross-fit** `best_single_crossfit`, not the full-K per-model max |
+| `routing_oracle` (denominator) | **Cross-fit** routing oracle, floored at the cross-fit baseline |
+
+Mixing the full-K `best_single` with the cross-fit oracle can make the denominator **negative**.
+That sign-flips the ratio: a router **below** the baseline can read as a large positive
+`router_gap_closed` (a false "near-ceiling" capture).
+
+When `routing_oracle - best_single_crossfit <= 0`, the ratio is **`NaN`** (no achievable
+headroom), not zero. Callers must check the headroom CI before interpreting the gap.
+
+Implementation: `scripts/oracle_ceiling.py::router_gap_closed`. Regression:
+`tests/test_router_gap_closed_baseline.py`.
+
 ## 2. The two ways a naive version lies (and the fixes)
 
 ### 2.1 False positive: the naive "solved by any model" oracle overcounts
