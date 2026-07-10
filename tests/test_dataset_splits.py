@@ -24,11 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from trinity.adapters.loaders import (
-    ToyFallbackWarning,
-    _resolve_split,
-    load_split,
-)
+from trinity.adapters.loaders import load_split
+from trinity.adapters.split_policy import ToyFallbackWarning, resolve_split
 from trinity.orchestration.dataset import load_tasks
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -85,25 +82,25 @@ def _warnings_as_list():
 
 
 # --------------------------------------------------------------------------- #
-# _resolve_split
+# split_policy.resolve_split
 # --------------------------------------------------------------------------- #
 def test_resolve_split_maps_mmlu_train_to_auxiliary_train():
-    assert _resolve_split("mmlu", "train") == "auxiliary_train"
+    assert resolve_split("mmlu", "train") == "auxiliary_train"
 
 
 def test_resolve_split_leaves_mmlu_test_alone():
-    assert _resolve_split("mmlu", "test") == "test"
+    assert resolve_split("mmlu", "test") == "test"
 
 
 def test_resolve_split_is_case_and_whitespace_insensitive():
-    assert _resolve_split("mmlu", "  TRAIN ") == "auxiliary_train"
+    assert resolve_split("mmlu", "  TRAIN ") == "auxiliary_train"
 
 
 @pytest.mark.parametrize("benchmark", ["math500", "gpqa", "livecodebench"])
 @pytest.mark.parametrize("split", ["train", "test"])
 def test_resolve_split_is_identity_for_unaliased_benchmarks(benchmark, split):
     """Only MMLU needs aliasing today; nothing else may be rewritten."""
-    assert _resolve_split(benchmark, split) == split
+    assert resolve_split(benchmark, split) == split
 
 
 # --------------------------------------------------------------------------- #

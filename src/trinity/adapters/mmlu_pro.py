@@ -25,6 +25,7 @@ from trinity.types import Task
 
 from .base import BenchmarkAdapter, TaskType
 from .registry import register_adapter
+from .split_policy import resolve_split, warn_on_toy_fallback
 
 __all__ = [
     "BENCHMARK",
@@ -93,11 +94,12 @@ def _answer_letter(row: Any, n_options: int) -> str | None:
 def _hf_mmlu_pro(split: str) -> list[Task] | None:
     """Load MMLU-Pro from HuggingFace, or ``None`` on any failure."""
     try:
-        from datasets import load_dataset  # type: ignore import-not-found
+        from datasets import load_dataset  # type: ignore[import-not-found]
     except Exception:
         return None
+    resolved = resolve_split(BENCHMARK, split)
     try:
-        ds = load_dataset(_HF_DATASET, split=split or "test")
+        ds = load_dataset(_HF_DATASET, split=resolved)
     except Exception:
         return None
 
@@ -164,7 +166,10 @@ def load_mmlu_pro_tasks(split: str, max_items: int | None, seed: int = 0) -> lis
     """
     import random
 
-    tasks = _hf_mmlu_pro(split) or _toy_mmlu_pro()
+    hf_tasks = _hf_mmlu_pro(split)
+    used_toy = hf_tasks is None
+    tasks = hf_tasks if hf_tasks is not None else _toy_mmlu_pro()
+    warn_on_toy_fallback(BENCHMARK, split, used_toy=used_toy)
     rng = random.Random(seed)
     tasks = list(tasks)
     rng.shuffle(tasks)

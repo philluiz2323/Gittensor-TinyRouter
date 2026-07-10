@@ -33,6 +33,32 @@ load_tasks('mmlu', 'test' ) -> n=5  real  ['mmlu-2', 'mmlu-1', ...]
 
 ---
 
+## 2026-07-10 — Hidden-benchmark cached answers used a bare prompt, not the WORKER turn  #mistake #finding #decision
+
+**Context:** `scripts/build_benchmark.py::_cache_answers` pre-computes each pool
+model's answer per question; those cached answers back the **70%-weighted**
+single-turn score in `pr_eval._evaluate_cached`.
+**Expected:** cached answers reflect how the pool is actually queried in the
+pipeline the router is trained and live-evaluated on.
+**Actual:** caching sent a bare `[{"role":"user","content": question_text}]`
+message — no role contract. But the single-model baseline
+(`trinity.eval._score_single_model`) and the live pipeline
+(`orchestration.session.run_trajectory`) both query via
+`build_messages(Role.WORKER, prompt, [])`, which prepends the WORKER system
+prompt. So the 70% cached component measured model behaviour on a prompt the
+pipeline never uses, and diverged from the 15% live component (which does use the
+WORKER turn).
+**Root cause:** the caching path bypassed `build_messages`, duplicating the
+message construction with a different (role-less) shape.
+**Fix / decision:** cache via `build_messages(Role.WORKER, question_text, [])`, so
+the cached single-turn answers match the baseline and the live path exactly. The
+integrity hash excludes `model_answers` (`benchmark_protocol._HASHED_ITEM_FIELDS`),
+so this changes only the cached answers on a rebuild, not the sealed question set.
+Covered by `tests/test_build_benchmark_cache_prompt.py` (a stub pool asserts the
+WORKER-role message layout and the skip-already-cached behaviour).
+**Follow-up:** none. Rebuilding a benchmark will refresh cached answers under the
+corrected prompt.
+
 ## 2026-07-09 — Rate-limit gate parsed UTC timestamps as local time  #mistake #finding #decision
 
 **Context:** Auditing the anti-cheat gates in `scripts/pr_eval.py`. Gate 1

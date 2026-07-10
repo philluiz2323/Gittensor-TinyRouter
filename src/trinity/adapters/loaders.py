@@ -18,59 +18,23 @@ HuggingFace dataset ids (when ``datasets`` + network are available):
 - livecodebench : ``livecodebench/code_generation_lite`` (V1 train / V6 eval)
 
 Logical splits ("train"/"test") are resolved to each dataset's native split name
-via ``_SPLIT_ALIASES`` -- upstream names do not always match, and a mismatch used
-to demote the caller to the toy set silently. ``load_split`` emits a
-``ToyFallbackWarning`` whenever the toy set stands in for real data.
+by :mod:`trinity.adapters.split_policy` -- upstream names do not always match, and
+a mismatch used to demote the caller to the toy set silently. ``load_split`` emits
+a ``ToyFallbackWarning`` whenever the toy set stands in for real data.
 """
 from __future__ import annotations
 
 import random
-import warnings
 from typing import Any
 
 from trinity.types import Task
+
+from .split_policy import resolve_split, warn_on_toy_fallback
 
 #: Benchmarks with a dedicated raw loader in this module.
 SUPPORTED_BENCHMARKS: tuple[str, ...] = ("math500", "mmlu", "gpqa", "livecodebench")
 
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
-
-# Logical split -> dataset-native split name, per benchmark.
-#
-# A logical split ("train"/"test") is *not* always the name the upstream dataset
-# uses. `cais/mmlu` ships {test, validation, dev, auxiliary_train} and has no
-# "train" at all, so forwarding "train" verbatim makes `load_dataset` raise and
-# silently demotes the caller to the toy set. Benchmarks absent from this table
-# pass their split through untouched; LiveCodeBench keeps its own mapping in
-# `_lcb_version_for_split` because it resolves to a release *config*, not a split.
-_SPLIT_ALIASES: dict[str, dict[str, str]] = {
-    # MMLU's official training pool is `auxiliary_train`; `test` is the eval split.
-    "mmlu": {"train": "auxiliary_train"},
-}
-
-
-class ToyFallbackWarning(UserWarning):
-    """Warns that a benchmark degraded to the built-in toy set.
-
-    The toy set exists so offline smoke tests run without a network. It must
-    never stand in for real data unnoticed: a wrong split name or a gated
-    repository would otherwise look exactly like intentional offline dev.
-    """
-
-
-def _resolve_split(benchmark: str, split: str) -> str:
-    """Map a logical split onto the split name the upstream dataset actually has.
-
-    Args:
-        benchmark: One of :data:`SUPPORTED_BENCHMARKS`.
-        split: The logical split, e.g. ``"train"`` or ``"test"``.
-
-    Returns:
-        The dataset-native split name, or ``split`` unchanged when the benchmark
-        needs no aliasing.
-    """
-    key = (split or "").strip().lower()
-    return _SPLIT_ALIASES.get(benchmark, {}).get(key, split)
 
 def _try_load_hf(
     path: str,
@@ -153,9 +117,10 @@ def _load_mmlu_hf(split: str) -> list[Task] | None:
     """MMLU loader. answer = correct option LETTER ("A".."D").
 
     ``cais/mmlu`` exposes {test, validation, dev, auxiliary_train}; the logical
-    ``"train"`` split is resolved to ``auxiliary_train`` by :func:`_resolve_split`.
+    ``"train"`` split is resolved to ``auxiliary_train`` by
+    :func:`~trinity.adapters.split_policy.resolve_split`.
     """
-    ds = _try_load_hf("cais/mmlu", name="all", split=_resolve_split("mmlu", split or "test"))
+    ds = _try_load_hf("cais/mmlu", name="all", split=resolve_split("mmlu", split))
     if ds is None:
         return None
     tasks: list[Task] = []
@@ -519,13 +484,7 @@ def load_split(
                 f"HuggingFace, and allow_toy_fallback=False. Install `datasets`, "
                 f"check network access, and verify the split exists upstream."
             )
-        warnings.warn(
-            f"Benchmark {key!r} split {split!r} could not be loaded from "
-            f"HuggingFace; falling back to the built-in toy set "
-            f"({len(_toy_tasks(key))} tasks). Results are not meaningful.",
-            ToyFallbackWarning,
-            stacklevel=2,
-        )
+        warn_on_toy_fallback(key, split, used_toy=True)
         tasks = _toy_tasks(key)
 
     rng = random.Random(seed)

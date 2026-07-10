@@ -8,7 +8,9 @@ The Verifier role ends its response with a line of the form::
 This module extracts that verdict deterministically and the free-text diagnosis
 that precedes it. Per SPEC §4.6 the parse is:
 
-- Scan for ``VERDICT:\\s*(ACCEPT|REVISE)`` (case-insensitive).
+- Scan for ``VERDICT:\\s*(ACCEPT|REVISE)\\b`` (case-insensitive). The trailing
+  word boundary matters: a longer word that merely *starts* with the token
+  (``ACCEPTABLE``, ``ACCEPTED``, ``REVISED``) is NOT a committed verdict.
 - Use the **last** match (the model may discuss ACCEPT/REVISE before committing).
 - If no match exists, return ``None``. The orchestration layer treats a missing
   verdict as fail-safe REVISE (it never terminates on an unparseable verifier,
@@ -23,7 +25,11 @@ import re
 __all__ = ["VERDICT_RE", "parse_verdict", "extract_diagnosis"]
 
 # Case-insensitive verdict pattern. ``finditer`` lets us take the LAST occurrence.
-VERDICT_RE = re.compile(r"VERDICT:\s*(ACCEPT|REVISE)", re.IGNORECASE)
+# The trailing ``\b`` anchors the token so a longer word that merely *starts* with
+# ACCEPT/REVISE ("VERDICT: ACCEPTABLE only if fixed", "ACCEPTED with reservations",
+# "REVISED the plan") is NOT read as a committed verdict. Without it the
+# orchestration layer would terminate the trajectory on a non-commitment.
+VERDICT_RE = re.compile(r"VERDICT:\s*(ACCEPT|REVISE)\b", re.IGNORECASE)
 
 
 def parse_verdict(text: str) -> str | None:
