@@ -43,6 +43,15 @@ the cross-fit best_single, which masks most of the residual. A fully order-invar
 (e.g. average over tied models) would be a larger change, deferred.
 
 
+## 2026-07-10 — Added an offline view of efficiency and composite-score tradeoffs  #finding #decision
+**Context:** contributors could see hidden/live accuracy, but the competition's 10% efficiency term still lived only inside `scripts/pr_eval.py::_compute_score`, making turn-efficiency tradeoffs hard to inspect offline.
+**Expected:** a miner can estimate the composite score and inspect turns-per-correct-answer without opening a PR or touching the hidden evaluator.
+**Actual:** there was no repo-local utility for that analysis; the formula existed only in the maintainer scorer.
+**Fix / decision:** add `src/trinity/efficiency.py` plus `scripts/efficiency_report.py` as an offline mirror of the current score formula, with per-answer efficiency summaries (`turns_per_correct`, optional calls/cost per correct) and tests that pin the implementation to `pr_eval` when importable.
+**Follow-up:** if the competition scoring formula changes, `pr_eval` and `trinity.efficiency` must be updated together so offline analysis stays aligned with the maintained scorer.
+
+---
+
 ## 2026-07-10 — The head never read `<Head Input>`; the EOS trick was a no-op  #mistake #gotcha #repro
 **Context:** verifying that `coordinator/slm.py::encode` matches the canonical extraction in SPEC §3.2 before trusting any head trained on it.
 **Expected:** `encode` tokenizes `transcript + "\n<Head Input>"`, appends one EOS, and reads index `-2` — the suffix's final token, a fixed decision position.
