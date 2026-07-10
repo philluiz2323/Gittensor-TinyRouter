@@ -345,11 +345,17 @@ def normalize_math_answer(ans: str | None) -> str:
     # already drops these commas.
     s = re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)
     s = s.lower()
-    # Canonicalize a pure integer ratio a/b.
-    m = re.fullmatch(r"\(?(-?\d+)\)?/\(?(-?\d+)\)?", s)
+    # Canonicalize a pure integer ratio a/b. A leading sign may sit OUTSIDE the
+    # parentheses: a negated LaTeX fraction (\-frac{3}{4}) normalizes to
+    # "-(3)/(4)", so the minus precedes the numerator's paren and must still be
+    # read as -3/4 (else -\frac{3}{4} never matches -3/4 or -0.75).
+    m = re.fullmatch(r"(-?)\(?(-?\d+)\)?/\(?(-?\d+)\)?", s)
     if m:
         try:
-            return str(Fraction(int(m.group(1)), int(m.group(2))))
+            num = int(m.group(2))
+            if m.group(1) == "-":
+                num = -num
+            return str(Fraction(num, int(m.group(3))))
         except (ZeroDivisionError, ValueError):
             pass
     return s
@@ -363,12 +369,15 @@ def _as_number(s: str) -> float | None:
         return float(s)
     except ValueError:
         pass
-    m = re.fullmatch(r"\(?(-?\d+(?:\.\d+)?)\)?/\(?(-?\d+(?:\.\d+)?)\)?", s)
+    m = re.fullmatch(r"(-?)\(?(-?\d+(?:\.\d+)?)\)?/\(?(-?\d+(?:\.\d+)?)\)?", s)
     if m:
         try:
-            denom = float(m.group(2))
+            denom = float(m.group(3))
             if denom != 0.0:
-                return float(m.group(1)) / denom
+                num = float(m.group(2))
+                if m.group(1) == "-":
+                    num = -num
+                return num / denom
         except ValueError:
             return None
     return None
