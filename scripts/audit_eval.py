@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import random
 from pathlib import Path
 from statistics import mean
 
@@ -77,7 +78,7 @@ async def run_audit(args) -> dict:
 
     # SPEC §1.3.4: budget-match the baselines to TRINITY, else the `best_single`
     # comparison below is decided partly on token budget rather than on routing.
-    from trinity.eval import single_model_budget
+    from trinity.eval import single_model_budget, task_rng
 
     single_max_tokens = single_model_budget(args.max_tokens, args.max_turns)
     print(f"[audit] budget-matched baselines: single-model max_tokens="
@@ -127,17 +128,20 @@ async def run_audit(args) -> dict:
     print(f"  TRINITY (trained)        = {s_trinity:.4f}")
 
     # --- Random routing baseline (100 seeds) ---
-    import random as _random
+    # Each trajectory draws from its OWN (seed, task_id)-seeded rng, so the
+    # baseline is invariant to asyncio scheduling. A single rng shared across the
+    # concurrently-gathered trajectories would consume draws in network-completion
+    # order, making the "sealed" audit number non-reproducible (mirrors the fix in
+    # trinity.eval.RandomPolicy / task_rng).
+    rand_policy = _RandomAuditPolicy(n_models)
     rand_scores = []
     for s in range(100):
-        rng = _random.Random(_AUDIT_SEED * 10000 + s)
+        seed_s = _AUDIT_SEED * 10000 + s
         async with httpx.AsyncClient() as cli:
             rt = await asyncio.gather(*[
                 run_trajectory(
-                    t,
-                    _RandomAuditPolicy(n_models, rng),
-                    pool, pool_models, sample=False,
-                    client=cli, **run_kwargs,
+                    t, rand_policy, pool, pool_models, sample=False,
+                    rng=task_rng(seed_s, t.task_id), client=cli, **run_kwargs,
                 )
                 for t in tasks
             ])
@@ -173,16 +177,24 @@ async def run_audit(args) -> dict:
 
 
 class _RandomAuditPolicy:
-    """Random routing — no GPU needed, no trinity imports."""
+    """Random routing — no GPU needed, no trinity imports.
 
-    def __init__(self, n_models: int, rng):
+    ``decide`` draws from the per-trajectory ``rng`` that ``run_trajectory`` passes
+    through, so the routing choices depend only on ``(seed, task_id)`` and never on
+    asyncio scheduling. A shared instance rng consumed by concurrently-gathered
+    trajectories would make the audit's random baseline non-reproducible; the
+    instance rng is only a fallback for direct calls without a per-trajectory rng.
+    """
+
+    def __init__(self, n_models: int, rng: random.Random | None = None):
         from trinity.types import ROLE_ORDER
         self.n_models = n_models
-        self.rng = rng
+        self.rng = rng if rng is not None else random.Random(0)
         self._roles = ROLE_ORDER
 
     def decide(self, transcript_text, *, sample=False, rng=None):
-        return self.rng.randrange(self.n_models), self.rng.choice(self._roles)
+        r = rng if rng is not None else self.rng
+        return r.randrange(self.n_models), r.choice(self._roles)
 
 
 def main() -> None:
