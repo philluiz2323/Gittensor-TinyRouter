@@ -75,6 +75,14 @@ async def run_audit(args) -> dict:
 
     results: dict[str, float] = {}
 
+    # SPEC §1.3.4: budget-match the baselines to TRINITY, else the `best_single`
+    # comparison below is decided partly on token budget rather than on routing.
+    from trinity.eval import single_model_budget
+
+    single_max_tokens = single_model_budget(args.max_tokens, args.max_turns)
+    print(f"[audit] budget-matched baselines: single-model max_tokens="
+          f"{single_max_tokens} ({args.max_turns}x {args.max_tokens})")
+
     # --- Single-model baselines ---
     for m in pool_models:
         from trinity.roles.prompts import build_messages
@@ -83,7 +91,7 @@ async def run_audit(args) -> dict:
             async def one(task):
                 msgs = build_messages(Role.WORKER, task.prompt, [])
                 res = await pool.chat(
-                    m, msgs, max_tokens=args.max_tokens, temperature=0.0,
+                    m, msgs, max_tokens=single_max_tokens, temperature=0.0,
                     reasoning=args.reasoning, client=cli,
                 )
                 return R.score_text(args.benchmark, res.text, task.answer)
