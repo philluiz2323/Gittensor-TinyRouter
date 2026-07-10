@@ -501,6 +501,13 @@ def analyze_matrix(
             "mcnemar_vs_best_single": mcnemar(tri, best_correct),
         }
 
+    # Pool-complementarity audit: which model is redundant, and which to swap. This
+    # is the other half advertised in this tool's title (docs/ORACLE_CEILING_DIAGNOSTIC
+    # .md §6, IMPROVEMENTS.md #1) — it answers the "swap which model?" the POOL_BOUND
+    # verdict raises. Read-only over the same solve tensor; changes no scoring math.
+    from trinity.analysis.complementarity import analyze_tensor
+
+    report["pool_complementarity"] = analyze_tensor(S, models).to_dict()
     report["verdict"] = _verdict(report)
     return report
 
@@ -527,6 +534,10 @@ def _verdict(report: dict) -> dict:
         label = "POOL_BOUND"
         msg = ("Routing cannot help on this pool: headroom CI upper bound <= 0.02 and "
                "includes 0. The lever is the model pool, not the router.")
+        # Name the concrete swap candidate the pool-complementarity audit identified.
+        swap = report.get("pool_complementarity", {}).get("swap_recommendation")
+        if swap:
+            msg = f"{msg} {swap}"
     elif lo > 0.0:
         if gap is not None and not math.isnan(gap) and gap < 0.5:
             label = "ROUTER_BOUND"
