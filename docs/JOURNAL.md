@@ -33,6 +33,32 @@ after :  transcript ends '2' -> head reads '>'     ends 'x' -> reads '>'   ends 
 **Follow-up:** the guard `input_ids.shape[1] < 2` can no longer trigger, since the suffix alone tokenizes to several tokens; left in place as a cheap invariant. Worth a follow-up: assert at load time that the tokenizer does not merge the suffix's final `>` into a preceding token for some other checkpoint.
 
 ---
+## 2026-07-10 — Cost-ledger append reset to genesis after any chain break  #mistake #decision
+**Context:** follow-up audit of the unified cost-ledger module from #87/#88.
+Concurrent OpenRouter chats (`max_concurrency` default 8) append to the same
+JSONL with no lock; a tip race can leave one sibling line whose hash does not
+link.
+**Expected:** after a break, later appends still link to the **last line's**
+`h` (pre-#88 writer behaviour), so the tip keeps advancing and only the broken
+prefix fails verification.
+**Actual:** `append_ledger_entry` continued only when `verify_ledger_chain_text`
+returned valid. On any failure it set `prev_hash=""`, so every later write was
+a new genesis. `cost_report.py --ledger` kept failing; `pack_submission.py`
+silently reported `$0` once `valid` was false. The in-memory `file_handle=`
+hook also always read tip from disk (or `""`), so multi-append via `StringIO`
+could not build a chain either.
+**Root cause:** the #87/#88 unification correctly shared payload encoding, but
+the continue policy was tightened to "link only if whole file verifies" —
+stricter than the old writer and permanently worse under concurrency.
+**Fix / decision:** always take `prev_hash` from the last non-empty line
+(`tip_hash_from_text`); derive tip from the handle when `file_handle` is set;
+wrap disk read-tip+append in a sidecar exclusive lock so concurrent writers
+share one tip. Verification stays strict for reporting. Covered by
+`tests/test_cost_ledger.py` (broken-prefix append + `StringIO` chain).
+**Follow-up:** none for the genesis-reset hole. A broken prefix still fails
+full-chain verify (by design); operators can truncate to the last good prefix
+if they need a clean receipt.
+
 ## 2026-07-10 — pack_submission priced ledger with flat blended rate, not in/out split  #mistake #finding #decision
 **Context:** wiring training receipts (`scripts/pack_submission.py`) to the verified
 cost ledger after #87 landed `trinity.llm.cost_ledger`.
