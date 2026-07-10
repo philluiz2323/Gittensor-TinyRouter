@@ -18,6 +18,20 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — MMLU training ran on 2 toy items: `cais/mmlu` has no `train` split  #mistake #gotcha #repro
+**Context:** auditing `orchestration/dataset.py` after the benchmark-adapter seam landed (#20), since `adapters/builtin.py` delegates task loading straight to `load_tasks`.
+**Expected:** `load_tasks("mmlu", "train")` returns MMLU training rows whenever `datasets` + network are available.
+**Actual:** it returns the 2-item built-in toy set — silently, even on a fully online box. `python -m trinity.train --benchmark mmlu` therefore optimized CMA-ES fitness over **two toy questions** and still wrote a normal-looking receipt. Reproduced offline with a fake `datasets` module mimicking the real upstream split set:
+```
+load_tasks('mmlu', 'train') -> n=2  TOY   ['mmlu-toy-0', 'mmlu-toy-1']
+load_tasks('mmlu', 'test' ) -> n=5  real  ['mmlu-2', 'mmlu-1', ...]
+```
+**Root cause:** two independently-reasonable behaviours composing into a silent failure. (1) `cais/mmlu` (config `all`) exposes `{test, validation, dev, auxiliary_train}` — there is no `train` split — but `_load_mmlu_hf` forwarded the logical split verbatim, so `load_dataset` raised. (2) `_try_load_hf` swallows *every* exception by design (so the offline dev box works), and `load_tasks` treats `None` as "offline" and substitutes the toy set. A wrong split name was thus indistinguishable from intentional offline dev. Only the train side was affected, because `test` happens to exist upstream — which is exactly why it went unnoticed.
+**Fix / decision:** resolve logical splits to dataset-native names through a `_SPLIT_ALIASES` table (`mmlu: train -> auxiliary_train`), mirroring the mapping `_lcb_version_for_split` already does for LiveCodeBench. Independently, make the fallback *loud*: `load_tasks` now emits `ToyFallbackWarning` naming the benchmark and split whenever the toy set stands in for real data, and takes `allow_toy_fallback=False` to raise instead. The toy set keeps working for smoke tests; it just can no longer impersonate real data.
+**Follow-up:** `gpqa` is gated on HF (`Idavidrein/gpqa`) and only publishes a `train` split, so `load_tasks("gpqa", "test")` still falls back — now *with a warning* rather than silently. Deciding whether to deterministically partition that single split into train/test is left as separate work, as is wiring `allow_toy_fallback=False` into `train.py` and `scripts/build_benchmark.py`, which should never accept toy data. See #14 (freeze the sampling protocol) — that work needs split names that resolve at all, which is what this entry fixes.
+
+---
+
 ## 2026-07-09 — Hosted pool switched from Fireworks to OpenRouter-only  #decision #finding
 **Context:** the repo had drifted: current roadmap/competition planning had already moved to the `qwen3.5-35b-a3b` / `minimax-m3` / `deepseek-v4-flash` pool, but the runnable code, scripts, and environment contract still assumed Fireworks plus `FIREWORKS_API_KEY`.
 **Expected:** one hosted-provider path, one API key contract, one default model pool, and pricing/config docs that all agree.

@@ -17,24 +17,35 @@ Design constraints (see docs/SPEC.md §6, §8):
 
 Public API
 ----------
-- ``load_tasks(benchmark, split, max_items, seed=0) -> list[Task]``
+- ``load_tasks(benchmark, split, max_items, seed=0, allow_toy_fallback=True) -> list[Task]``
 - ``sample_minibatch(tasks, m, rng) -> list[Task]``
 - ``SUPPORTED_BENCHMARKS`` (tuple[str, ...])
+- ``ToyFallbackWarning`` (emitted whenever the toy set stands in for real data)
 
 The HuggingFace dataset ids used (when ``datasets`` + network are available):
 - math500       : ``HuggingFaceH4/MATH-500`` (fallback ``qwedsacf/competition_math``)
-- mmlu          : ``cais/mmlu`` (config ``all``)
+- mmlu          : ``cais/mmlu`` (config ``all``; train -> ``auxiliary_train``)
 - gpqa          : ``Idavidrein/gpqa`` (config ``gpqa_diamond``)
 - livecodebench : ``livecodebench/code_generation_lite`` (V1 train / V6 eval)
+
+Logical splits ("train"/"test") are resolved to each dataset's native split name
+via ``_SPLIT_ALIASES`` -- upstream names do not always match, and a mismatch used
+to demote the caller to the toy set silently.
 """
 from __future__ import annotations
 
 import random
+import warnings
 from typing import Any
 
 from trinity.types import Task
 
-__all__ = ["load_tasks", "sample_minibatch", "SUPPORTED_BENCHMARKS"]
+__all__ = [
+    "load_tasks",
+    "sample_minibatch",
+    "SUPPORTED_BENCHMARKS",
+    "ToyFallbackWarning",
+]
 
 SUPPORTED_BENCHMARKS: tuple[str, ...] = (
     "math500",
@@ -45,6 +56,48 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
 
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
+
+# Logical split -> dataset-native split name, per benchmark.
+#
+# A logical split ("train"/"test") is *not* always the name the upstream dataset
+# uses. `cais/mmlu` ships {test, validation, dev, auxiliary_train} and has no
+# "train" at all, so forwarding "train" verbatim makes `load_dataset` raise and
+# silently demotes the caller to the toy set. Benchmarks absent from this table
+# pass their split through untouched; LiveCodeBench keeps its own mapping in
+# `_lcb_version_for_split` because it resolves to a release *config*, not a split.
+_SPLIT_ALIASES: dict[str, dict[str, str]] = {
+    # MMLU's official training pool is `auxiliary_train`; `test` is the eval split.
+    "mmlu": {"train": "auxiliary_train"},
+}
+
+
+class ToyFallbackWarning(UserWarning):
+    """Raised as a warning when a benchmark degrades to the built-in toy set.
+
+    The toy set exists so offline smoke tests run without a network. It must
+    never stand in for real data unnoticed: a wrong split name or a gated
+    repository would otherwise look exactly like intentional offline dev.
+    """
+
+
+def _resolve_split(benchmark: str, split: str) -> str:
+    """Map a logical split onto the split name the upstream dataset actually has.
+
+    Parameters
+    ----------
+    benchmark:
+        One of :data:`SUPPORTED_BENCHMARKS`.
+    split:
+        The logical split, e.g. ``"train"`` or ``"test"``.
+
+    Returns
+    -------
+    str
+        The dataset-native split name, or ``split`` unchanged when the benchmark
+        needs no aliasing.
+    """
+    key = (split or "").strip().lower()
+    return _SPLIT_ALIASES.get(benchmark, {}).get(key, split)
 
 
 # --------------------------------------------------------------------------- #
@@ -134,8 +187,12 @@ def _load_math500_hf(split: str) -> list[Task] | None:
 
 
 def _load_mmlu_hf(split: str) -> list[Task] | None:
-    """MMLU loader. answer = correct option LETTER ("A".."D")."""
-    ds = _try_load_hf("cais/mmlu", name="all", split=split or "test")
+    """MMLU loader. answer = correct option LETTER ("A".."D").
+
+    ``cais/mmlu`` exposes {test, validation, dev, auxiliary_train}; the logical
+    ``"train"`` split is resolved to ``auxiliary_train`` by :func:`_resolve_split`.
+    """
+    ds = _try_load_hf("cais/mmlu", name="all", split=_resolve_split("mmlu", split or "test"))
     if ds is None:
         return None
     tasks: list[Task] = []
@@ -472,13 +529,15 @@ def load_tasks(
     split: str,
     max_items: int | None,
     seed: int = 0,
+    allow_toy_fallback: bool = True,
 ) -> list[Task]:
     """Load a benchmark as a deterministic list of :class:`Task`.
 
     Tries the HuggingFace ``datasets`` loader first (lazy/guarded import). If
     ``datasets`` or the network is unavailable -- or the dataset id is gated /
     missing -- it transparently falls back to a tiny built-in toy set so smoke
-    tests run offline.
+    tests run offline. Falling back always emits a :class:`ToyFallbackWarning`,
+    so a genuine load failure can never masquerade as real data.
 
     The returned list is deterministically shuffled by ``seed`` and then
     truncated to ``max_items`` (if not ``None``), so repeated calls with the same
@@ -489,12 +548,17 @@ def load_tasks(
     benchmark:
         One of :data:`SUPPORTED_BENCHMARKS`.
     split:
-        Logical split passed to the loader, e.g. ``"train"`` / ``"test"``. For
-        LiveCodeBench this maps to the release version (V1 train / V6 eval).
+        Logical split passed to the loader, e.g. ``"train"`` / ``"test"``. It is
+        resolved to the dataset's native split name (see :func:`_resolve_split`).
+        For LiveCodeBench this maps to the release version (V1 train / V6 eval).
     max_items:
         Cap on the number of tasks returned; ``None`` means all.
     seed:
         Seed controlling the deterministic shuffle (and toy/HF parity).
+    allow_toy_fallback:
+        When ``True`` (the default) an unavailable dataset degrades to the toy
+        set with a warning. When ``False`` it raises instead -- use this for
+        training and hidden-benchmark builds, where toy data is never acceptable.
 
     Returns
     -------
@@ -505,6 +569,8 @@ def load_tasks(
     ------
     ValueError
         If ``benchmark`` is not supported.
+    RuntimeError
+        If the dataset could not be loaded and ``allow_toy_fallback`` is ``False``.
     """
     if benchmark not in _HF_LOADERS:
         raise ValueError(
@@ -513,7 +579,21 @@ def load_tasks(
 
     tasks = _HF_LOADERS[benchmark](split)
     if not tasks:
-        # Offline / failed load -> built-in toy set.
+        # Offline / failed load -> built-in toy set. Never do this quietly: a
+        # wrong split name looks identical to intentional offline dev.
+        if not allow_toy_fallback:
+            raise RuntimeError(
+                f"Could not load benchmark {benchmark!r} split {split!r} from "
+                f"HuggingFace, and allow_toy_fallback=False. Install `datasets`, "
+                f"check network access, and verify the split exists upstream."
+            )
+        warnings.warn(
+            f"Benchmark {benchmark!r} split {split!r} could not be loaded from "
+            f"HuggingFace; falling back to the built-in toy set "
+            f"({len(_toy_tasks(benchmark))} tasks). Results are not meaningful.",
+            ToyFallbackWarning,
+            stacklevel=2,
+        )
         tasks = _toy_tasks(benchmark)
 
     # Deterministic shuffle for reproducible minibatch composition across runs.
