@@ -18,6 +18,29 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — Cost-ledger verifier hashed a different JSON string than the writer  #mistake #decision
+**Context:** checking the token-cost ledger path used by training, `cost_report.py`,
+and submission packing.
+**Expected:** a ledger written by `OpenRouterPool._ledger_append` verifies in
+`scripts/cost_report.py --ledger`, and the submission packer prices the same
+entries from the same parsed rows.
+**Actual:** legitimate ledgers failed verification. The writer hashed a fixed,
+compact payload string (`{"m":"...","p":...,"c":...}` in that key order), while
+the verifier rebuilt the payload with `json.dumps(..., sort_keys=True)`, which
+changes the byte string and therefore the hash. `pack_submission.py` then read
+the same file through a separate ad-hoc path, so the write, verify, and summarize
+steps were not sharing one canonical implementation.
+**Root cause:** the hash-chain format existed only implicitly inside the writer.
+Verifiers reimplemented it differently, and nothing enforced one shared payload
+encoding.
+**Fix / decision:** add `trinity.llm.cost_ledger` as the single source of truth
+for payload formatting, chained hashing, line parsing, ledger verification, and
+append helpers. Route `openrouter_client`, `cost_report.py`, and
+`pack_submission.py` through it, and cover the regression with
+`tests/test_cost_ledger.py`.
+**Follow-up:** the append helper writes text-only handles; keeping the test hook
+typed as `TextIO` avoids implying binary support the implementation does not have.
+
 ## 2026-07-10 — Rate-limit gate counted wins, not attempts  #mistake #finding #decision
 
 **Context:** follow-up from the UTC timestamp fix on Gate 1 (`_check_rate_limit`).
