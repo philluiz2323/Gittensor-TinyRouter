@@ -50,7 +50,7 @@ def _import_cma():
     """Import pycma lazily, so this module (and trinity.optim) imports cleanly on
     boxes without `cma` — it is only needed when an optimizer is actually built."""
     try:
-        import cma  # type: ignore
+        import cma
 
         return cma
     except ImportError as exc:  # pragma: no cover - exercised only when missing.

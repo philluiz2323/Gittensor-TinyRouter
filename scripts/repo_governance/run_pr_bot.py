@@ -94,7 +94,16 @@ def main(argv: list[str] | None = None) -> int:
                 token,
             )
     except urllib.error.HTTPError as exc:
-        print(exc.read().decode("utf-8"), file=sys.stderr)
+        detail = exc.read().decode("utf-8")
+        if exc.code == 403:
+            print(
+                "warning: GitHub API rejected write-back (403); "
+                "analysis above is still valid for fork PRs.",
+                file=sys.stderr,
+            )
+            print(detail, file=sys.stderr)
+            return 0
+        print(detail, file=sys.stderr)
         return 1
     return 0
 

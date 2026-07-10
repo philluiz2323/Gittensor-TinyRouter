@@ -158,17 +158,31 @@ def _parse_utc_timestamp(ts_str: str) -> Optional[float]:
         return None
 
 
+def _rate_limit_entries(bench_entry: dict) -> list:
+    """Entries that consume the weekly submission slot.
+
+    Prefer ``attempts`` (every eval that passed Gate 1). Fall back to
+    ``history`` for leaderboards written before attempts were recorded — that
+    log only contained wins, which is the hole this gate used to have.
+    """
+    attempts = bench_entry.get("attempts")
+    if attempts is not None:
+        return attempts
+    return bench_entry.get("history", [])
+
+
 def _check_rate_limit(miner_name: str, benchmark: str, leaderboard: dict) -> Optional[str]:
     """Check if miner has exceeded the submission rate limit.
 
-    Returns None if allowed, or an error string if rate-limited.
+    Counts prior *attempts* (not only approved wins). Returns None if allowed,
+    or an error string if rate-limited.
     """
     bench_entry = leaderboard.get("benchmarks", {}).get(benchmark, {})
-    history = bench_entry.get("history", [])
+    entries = _rate_limit_entries(bench_entry)
 
     cutoff = time.time() - _RATE_LIMIT_WINDOW_DAYS * 86400
     recent = 0
-    for entry in history:
+    for entry in entries:
         ts = _parse_utc_timestamp(entry.get("timestamp", ""))
         if ts is None:
             continue
@@ -548,12 +562,8 @@ def _load_leaderboard() -> dict:
     return {"benchmarks": {}}
 
 
-def _update_leaderboard(benchmark: str, miner_name: str, generation: int,
-                         pr_number: int, score: float, hidden_acc: float,
-                         live_acc: float, avg_turns: float) -> None:
-    """Update leaderboard.json with a new winning submission."""
-    lb = _load_leaderboard()
-    bench_entry = lb.setdefault("benchmarks", {}).setdefault(benchmark, {
+def _empty_bench_entry() -> dict:
+    return {
         "best_score": 0.0,
         "best_miner": None,
         "best_generation": 0,
@@ -562,7 +572,46 @@ def _update_leaderboard(benchmark: str, miner_name: str, generation: int,
         "best_single_model": None,
         "oracle_ceiling": None,
         "history": [],
+        "attempts": [],
+    }
+
+
+def _record_attempt(benchmark: str, miner_name: str, generation: int,
+                    pr_number: int) -> None:
+    """Consume one weekly submission slot for ``miner_name`` on ``benchmark``.
+
+    Called as soon as Gate 1 passes so later gate failures and score-rejections
+    still count toward the rate limit (SUBMITTING.md: 1 submission / week).
+    On first write, seeds ``attempts`` from legacy win-only ``history`` so a
+    recent winner remains rate-limited after this change rolls out.
+    """
+    lb = _load_leaderboard()
+    bench_entry = lb.setdefault("benchmarks", {}).setdefault(
+        benchmark, _empty_bench_entry(),
+    )
+    if "attempts" not in bench_entry:
+        bench_entry["attempts"] = [
+            dict(entry) for entry in bench_entry.get("history", [])
+        ]
+    bench_entry["attempts"].append({
+        "miner": miner_name,
+        "generation": generation,
+        "pr": pr_number,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     })
+    lb["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    (_REPO / "leaderboard.json").write_text(json.dumps(lb, indent=2) + "\n")
+    print(f"[pr_eval] attempt recorded for rate limit ({miner_name}/{generation})")
+
+
+def _update_leaderboard(benchmark: str, miner_name: str, generation: int,
+                         pr_number: int, score: float, hidden_acc: float,
+                         live_acc: float, avg_turns: float) -> None:
+    """Update leaderboard.json with a new winning submission."""
+    lb = _load_leaderboard()
+    bench_entry = lb.setdefault("benchmarks", {}).setdefault(
+        benchmark, _empty_bench_entry(),
+    )
 
     bench_entry["best_score"] = round(score, 4)
     bench_entry["best_miner"] = miner_name
@@ -570,7 +619,7 @@ def _update_leaderboard(benchmark: str, miner_name: str, generation: int,
     bench_entry["best_pr"] = pr_number
     bench_entry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    bench_entry["history"].append({
+    bench_entry.setdefault("history", []).append({
         "miner": miner_name,
         "generation": generation,
         "score": round(score, 4),
@@ -622,6 +671,9 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     err = _check_rate_limit(miner_name, benchmark, lb)
     if err:
         return _reject(err)
+    # Slot consumed even if later gates fail or the score loses — otherwise
+    # rejected attempts never counted and miners could probe weekly.
+    _record_attempt(benchmark, miner_name, generation, pr_number)
 
     # ══════════════════════════════════════════════════════════════
     # GATE 2: Weight Validation (NaN, Inf, extreme values, untrained)

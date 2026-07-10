@@ -29,6 +29,7 @@ local dev machine has no torch/GPU; only the remote H200 box loads the model.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import yaml
@@ -96,11 +97,14 @@ class CoordinatorEncoder:
         self._dtype = self._resolve_dtype(dtype)
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(
+        # `from_pretrained` is a decorated classmethod, so its return type does not
+        # carry `.to`; bind through Any before moving the module to the device.
+        model: Any = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=self._dtype,
             output_hidden_states=True,
         )
+        self.model = model
         self.model.to(device)
         self.model.eval()
         # The orthogonal SVD factors and head are not trained via autograd

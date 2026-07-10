@@ -41,6 +41,33 @@ PRICES: dict[str, tuple[float, float]] = {
 }
 
 
+def _conductor_price(
+    lookup: dict[str, tuple[float, float]],
+    conductor_model: str | None,
+    conductor_local: bool,
+) -> tuple[float, float]:
+    """Return the ``(price_in, price_out)`` charged for the Conductor's generation.
+
+    A locally-served Conductor costs no API money -- only GPU time, which the caller
+    accounts for separately -- so it prices at zero. A hosted Conductor prices at its
+    own model's rate.
+
+    Keeping this rule in one place stops :func:`price_table` and the estimators from
+    disagreeing about when the Conductor is billed.
+
+    Args:
+        lookup: Table used to resolve ``conductor_model``'s per-token price.
+        conductor_model: The Conductor's model name, or ``None`` when unspecified.
+        conductor_local: Whether the Conductor runs on our own hardware.
+
+    Returns:
+        The ``(price_in, price_out)`` pair, in $ per 1M tokens.
+    """
+    if conductor_local or conductor_model is None:
+        return (0.0, 0.0)
+    return lookup.get(conductor_model, (0.0, 0.0))
+
+
 def price_table(
     conductor_model: str | None = None,
     *,
@@ -58,10 +85,7 @@ def price_table(
     table = dict(PRICES)
     if extra:
         table.update(extra)
-    if conductor_local or conductor_model is None:
-        table[CONDUCTOR_KEY] = (0.0, 0.0)
-    else:
-        table[CONDUCTOR_KEY] = table.get(conductor_model, (0.0, 0.0))
+    table[CONDUCTOR_KEY] = _conductor_price(table, conductor_model, conductor_local)
     return table
 
 
@@ -165,10 +189,28 @@ def estimate_grpo_cost(
     ``iterations`` iterations. With ``conductor_local=True`` the Conductor runs on
     our own GPU, so only the worker calls cost API money; the GPU hours are noted
     separately by the caller.
+
+    ``prices``, when given, overrides the worker prices. It does not disable
+    Conductor pricing: unless it carries an explicit ``CONDUCTOR_KEY`` entry, the
+    Conductor is still priced from ``conductor_local`` / ``conductor_model``, so a
+    projection can never under-state spend by omitting a component it was told to
+    include.
     """
-    table = prices if prices is not None else price_table(
-        conductor_model, conductor_local=conductor_local
-    )
+    if prices is None:
+        table = price_table(conductor_model, conductor_local=conductor_local)
+    else:
+        # An explicit `prices` table stays authoritative for the WORKER models, but
+        # it must not silently disable Conductor pricing: a worker table carries no
+        # CONDUCTOR_KEY, so `table.get(CONDUCTOR_KEY, (0, 0))` would bill the
+        # Conductor $0 even under `conductor_local=False`. Derive the entry from the
+        # same rule `price_table` uses, resolving the model's rate against PRICES
+        # overlaid with the caller's table. A caller that supplies CONDUCTOR_KEY
+        # explicitly keeps it.
+        table = dict(prices)
+        if CONDUCTOR_KEY not in table:
+            table[CONDUCTOR_KEY] = _conductor_price(
+                {**PRICES, **table}, conductor_model, conductor_local
+            )
     rollouts = group_size * questions_per_iter * iterations
     worker_calls = int(round(rollouts * avg_steps))
 

@@ -94,7 +94,7 @@ def _answer_letter(row: Any, n_options: int) -> str | None:
 def _hf_mmlu_pro(split: str) -> list[Task] | None:
     """Load MMLU-Pro from HuggingFace, or ``None`` on any failure."""
     try:
-        from datasets import load_dataset  # type: ignore[import-not-found]
+        from datasets import load_dataset
     except Exception:
         return None
     resolved = resolve_split(BENCHMARK, split)

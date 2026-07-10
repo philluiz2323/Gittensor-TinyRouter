@@ -58,7 +58,7 @@ def _try_load_hf(
     The loaded dataset object, or ``None`` if loading was not possible.
     """
     try:
-        from datasets import load_dataset  # type: ignore[import-not-found]
+        from datasets import load_dataset
     except Exception:
         return None
     try:
@@ -451,17 +451,17 @@ def load_split(
     resolved_split = resolve_split(key, logical_split)
     loaded = _HF_LOADERS[key](resolved_split)
     used_toy = not loaded
-    if not loaded:
-        tasks = _toy_tasks(key)
-    else:
-        # Single-split benchmarks (GPQA) serve both logical splits from one
-        # upstream split; carve them apart deterministically. Pass-through for
-        # every benchmark that publishes its own test split.
-        tasks = select_holdout(key, logical_split, loaded)
+    # Narrow on ``loaded`` itself: a separate ``used_toy`` bool cannot tell the
+    # type checker that the loader did not return None.
+    #
+    # Single-split benchmarks (GPQA) serve both logical splits from one upstream
+    # split, so carve them apart deterministically. ``select_holdout`` returns a
+    # fresh list and passes through unchanged for every benchmark that publishes
+    # its own test split.
+    tasks = select_holdout(key, logical_split, loaded) if loaded else _toy_tasks(key)
     warn_on_toy_fallback(key, logical_split, used_toy=used_toy)
 
     rng = random.Random(seed)
-    tasks = list(tasks)
     rng.shuffle(tasks)
 
     if max_items is not None:

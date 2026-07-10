@@ -210,7 +210,7 @@ def _row_get(row: Any, *keys: str, default: Any = None) -> Any:
 def _hf_swebench(split: str) -> list[Task] | None:
     """Load SWE-bench Verified from HuggingFace, or ``None`` on any failure."""
     try:
-        from datasets import load_dataset  # type: ignore[import-not-found]
+        from datasets import load_dataset
     except Exception:
         return None
     try:

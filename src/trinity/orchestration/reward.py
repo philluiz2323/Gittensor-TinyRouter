@@ -276,6 +276,10 @@ def extract_last_number(text: str) -> str | None:
     """
     if not text:
         return None
+    # LaTeX digit grouping: "1{,}000" renders as "1,000". Normalize it to a bare
+    # comma so the thousands-separator branch below reads it as one number instead
+    # of splitting it into "1" and "000".
+    text = text.replace("{,}", ",")
     # Match a simple fraction a/b FIRST (so "1/2" is kept whole, not read as "2"),
     # then decimals/integers like -1,234.56 or 42 or .5 ; require a digit somewhere.
     pattern = re.compile(
@@ -331,6 +335,9 @@ def normalize_math_answer(ans: str | None) -> str:
     s = re.sub(r"\\d?frac\s*(\d)\s*(\d)", r"\1/\2", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
     s = re.sub(r"\s+", "", s)
+    # LaTeX digit grouping "1{,}000" -> "1,000" so the comma-strip below removes it
+    # (a boxed answer like \boxed{2{,}048} otherwise never matches "2048").
+    s = s.replace("{,}", ",")
     # Strip digit-grouping commas ("2,000" -> "2000", "1,000,000" -> "1000000") so
     # a thousands-separated answer is not a false negative. Only a comma between a
     # digit and a group of exactly three digits at a non-digit boundary is removed,

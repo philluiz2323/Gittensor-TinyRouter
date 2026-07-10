@@ -51,7 +51,13 @@ def _request(method: str, url: str, token: str, payload: dict | None = None) -> 
         return exc.code, exc.read().decode("utf-8")
 
 
-def ensure_labels(repo: str, token: str) -> None:
+def ensure_labels(repo: str, token: str) -> list[str]:
+    """Create missing governance labels.
+
+    Returns human-readable warnings for non-fatal failures (e.g. fork PRs where
+    ``GITHUB_TOKEN`` is read-only and cannot create labels).
+    """
+    warnings: list[str] = []
     for spec in REQUIRED_LABELS:
         url = f"{_API}/repos/{repo}/labels/{spec['name'].replace(':', '%3A')}"
         status, _ = _request("GET", url, token)
@@ -59,8 +65,16 @@ def ensure_labels(repo: str, token: str) -> None:
             continue
         create_url = f"{_API}/repos/{repo}/labels"
         status, body = _request("POST", create_url, token, spec)
-        if status not in (200, 201):
-            raise RuntimeError(f"Failed to create label {spec['name']}: {status} {body}")
+        if status in (200, 201):
+            continue
+        if status == 403:
+            warnings.append(
+                f"Cannot create label {spec['name']!r}: token lacks write permission "
+                f"(fork PR workflows are read-only)."
+            )
+            continue
+        raise RuntimeError(f"Failed to create label {spec['name']}: {status} {body}")
+    return warnings
 
 
 def main() -> int:
@@ -69,7 +83,9 @@ def main() -> int:
     if not repo or not token:
         print("GITHUB_REPOSITORY and GITHUB_TOKEN are required.", file=sys.stderr)
         return 1
-    ensure_labels(repo, token)
+    warnings = ensure_labels(repo, token)
+    for note in warnings:
+        print(f"warning: {note}", file=sys.stderr)
     print(f"Ensured governance labels on {repo}")
     return 0
 
