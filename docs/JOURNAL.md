@@ -42,6 +42,22 @@ Eval stays pure binary (unaffected — it never calls `_task_reward`).
 answers early is no longer double-charged (short-trajectory penalty credit *and* a spurious
 format-bonus withholding).
 
+
+## 2026-07-10 — The head never read `<Head Input>`; the EOS trick was a no-op  #mistake #gotcha #repro
+**Context:** verifying that `coordinator/slm.py::encode` matches the canonical extraction in SPEC §3.2 before trusting any head trained on it.
+**Expected:** `encode` tokenizes `transcript + "\n<Head Input>"`, appends one EOS, and reads index `-2` — the suffix's final token, a fixed decision position.
+**Actual:** the suffix was never appended. The string `<Head Input>` appeared nowhere in `src/`. `encode` tokenized the bare transcript, appended EOS, and read `-2` — which is the transcript's **last content token**. Its own comment asserted the opposite: *"The last real content token therefore sits at index -2 (the `<Head Input>` position)."* Both cannot be true. Demonstrated with a char-code tokenizer and an echo model:
+```
+before:  transcript ends '2' -> head reads '2'     ends 'x' -> reads 'x'   ends 's' -> reads 's'
+after :  transcript ends '2' -> head reads '>'     ends 'x' -> reads '>'   ends 's' -> reads '>'
+```
+**Root cause:** two changes that each look right in isolation. Appending EOS *does* create a penultimate position — but **attention is causal**, so the hidden state at `-2` cannot attend to the EOS at `-1`. `h[-2]` with an EOS appended is bit-identical to the last content token's state with no EOS at all (pinned by `test_appending_eos_is_a_noop_under_causal_attention`, which builds a minimal causal block and asserts the equality). The EOS append was therefore a **no-op**: it renamed the last content token as "penultimate" without changing which vector the head sees. Only the suffix creates a position whose identity is independent of the transcript.
+**Why it matters:** the head's sole input (SPEC §3.2: *"no pooling, no turn index, no role one-hots"*) was a token that varies with whatever the transcript happened to end on — a code brace, a digit, a period. SPEC §3.2 records the ablation for reading a content token rather than the intended one: **LiveCodeBench 61.46 → 50.85**.
+**Fix / decision:** append `HEAD_INPUT_SUFFIX = "\n<Head Input>"` before tokenizing, and export it as a module constant so train and inference cannot drift. Keep the EOS append and the `-2` read exactly as SPEC prescribes — with the suffix present, `-2` is now the suffix's final token.
+**Consequence to be explicit about:** this changes the coordinator's feature. `encode` is called by both training and evaluation, so the two stay consistent with each other — but any head trained *before* this fix was fitted to the old (last-content-token) feature. Those heads are not comparable to heads trained after it, and the leaderboard's archived `best_theta` files were fitted to the wrong feature. This wants a re-train, exactly as the 2026-06-23 extraction fix did.
+**Follow-up:** the guard `input_ids.shape[1] < 2` can no longer trigger, since the suffix alone tokenizes to several tokens; left in place as a cheap invariant. Worth a follow-up: assert at load time that the tokenizer does not merge the suffix's final `>` into a preceding token for some other checkpoint.
+
+---
 ## 2026-07-10 — R1/R2 gave TRINITY 5x the token budget of the baselines it beat  #mistake #gotcha
 **Context:** auditing `trinity/eval.py` against SPEC §1.3 before trusting an R1/R2 verdict.
 **Expected:** the single-model baselines are budget-matched to TRINITY, as SPEC §1.3.4 requires: *"run each single model at `max_tokens = 20,480` (5×) so the single-vs-TRINITY comparison is fair, matching the paper's 5× protocol."* The same 5× appears in the 2026-06-22 SPEC-decisions entry and in SPEC's own R1 row (*"budget-matched 5×"*).
