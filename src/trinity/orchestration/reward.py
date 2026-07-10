@@ -412,11 +412,16 @@ def normalize_math_answer(ans: str | None) -> str:
     s = s.strip()
     if s.startswith("="):
         s = s[1:].strip()
-    # Strip a single outer pair of \{ \} or { }.
-    s = re.sub(r"^\\?\{(.*)\\?\}$", r"\1", s).strip()
-    # \frac{a}{b} -> a/b
-    s = re.sub(r"\\d?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
-    s = re.sub(r"\\d?frac\s*(\d)\s*(\d)", r"\1/\2", s)
+    # Strip a single outer pair of \{ \} or { }. The capture is LAZY so the
+    # trailing optional backslash can consume a "\}" escape; a greedy ".*" eats it
+    # first, leaving a stray backslash ("\{1,2\}" -> "1,2\") that fails to match a
+    # plainly-braced reference. Set-notation answers (\boxed{\{1,2,3\}}) hit this.
+    s = re.sub(r"^\\?\{(.*?)\\?\}$", r"\1", s).strip()
+    # \frac{a}{b} -> a/b. The [dt]? matches the whole textstyle/displaystyle
+    # fraction family — \frac, \dfrac and \tfrac all render the same value, so they
+    # must normalize identically (else \tfrac{3}{4} is a false negative vs \dfrac).
+    s = re.sub(r"\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
+    s = re.sub(r"\\[dt]?frac\s*(\d)\s*(\d)", r"\1/\2", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
     s = re.sub(r"\s+", "", s)
     # LaTeX digit grouping "1{,}000" -> "1,000" so the comma-strip below removes it
