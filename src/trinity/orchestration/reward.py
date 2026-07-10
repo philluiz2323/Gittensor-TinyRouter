@@ -58,6 +58,7 @@ __all__ = [
     "MATH_BENCHMARKS",
     "CHOICE_BENCHMARKS",
     "CODE_BENCHMARKS",
+    "resolve_benchmark",
 ]
 
 # Benchmark routing tables. Keys are matched case-insensitively against
@@ -74,6 +75,39 @@ _CHOICE_LETTERS: str = "ABCDEFGHIJ"
 CODE_BENCHMARKS: frozenset[str] = frozenset(
     {"livecodebench", "lcb", "bigcodebench", "bigcode"}
 )
+
+# Some frozen hidden-benchmark items carry a versioned adapter *identity* as
+# their benchmark instead of a bare family key: the LiveCodeBench v6 adapter
+# serialises ``"livecodebench_v6"`` so the frozen item records which release
+# produced it (see ``adapters.livecodebench.LiveCodeBenchV6Adapter``). That
+# identity is not itself a dispatch key, so it must be mapped to the family its
+# checker is registered under; otherwise ``score_text``/``has_answer`` treat
+# every frozen v6 item as an unknown benchmark and raise. Kept as an explicit map
+# (never fuzzy suffix-stripping) so a real benchmark can never be mis-routed.
+_BENCHMARK_ALIASES: dict[str, str] = {
+    "livecodebench_v6": "livecodebench",
+}
+
+
+def resolve_benchmark(benchmark: str) -> str:
+    """Normalize a benchmark identifier to its dispatch key.
+
+    Lower-cases and trims ``benchmark``, then maps a known versioned/adapter
+    *identity* (see ``_BENCHMARK_ALIASES``) onto the ``MATH``/``CHOICE``/``CODE``
+    dispatch key its checker is registered under. Unknown or already-canonical
+    keys are returned unchanged, so this is a safe no-op for the four shipped
+    benchmarks and for a genuinely unrecognized name (which still raises in
+    :func:`score_text`).
+
+    Args:
+        benchmark: Raw benchmark identifier, e.g. ``"livecodebench_v6"`` or
+            ``"MATH500"``.
+
+    Returns:
+        The canonical dispatch key, lower-cased and trimmed.
+    """
+    key = (benchmark or "").strip().lower()
+    return _BENCHMARK_ALIASES.get(key, key)
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +194,7 @@ def has_answer(benchmark: str, text: str) -> bool:
     """
     if not text:
         return False
-    key = (benchmark or "").strip().lower()
+    key = resolve_benchmark(benchmark)
     if key in CHOICE_BENCHMARKS:
         return extract_choice_letter(text) is not None
     if key in MATH_BENCHMARKS:
@@ -190,7 +224,7 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
     Raises:
         ValueError: If ``benchmark`` is not recognized.
     """
-    key = (benchmark or "").strip().lower()
+    key = resolve_benchmark(benchmark)
     if key in MATH_BENCHMARKS:
         return 1.0 if _check_math(candidate, reference) else 0.0
     if key in CHOICE_BENCHMARKS:
