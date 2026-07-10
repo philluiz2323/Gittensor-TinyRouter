@@ -10,6 +10,7 @@ __all__ = [
     "CANONICAL_ITEM_FIELDS",
     "build_hidden_item",
     "from_adapter_task",
+    "from_protocol_item",
     "to_protocol_item",
 ]
 
@@ -92,3 +93,32 @@ def to_protocol_item(item: Mapping[str, Any]) -> dict[str, Any]:
     if scores:
         protocol_item["model_scores"] = dict(scores)
     return protocol_item
+
+
+def from_protocol_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Parse an on-disk hidden-benchmark item back into the canonical schema.
+
+    The inverse of :func:`to_protocol_item`: it reads the frozen protocol's
+    legacy field names (``question_id`` / ``question_text`` / ``correct_answer``
+    / ``model_answers``) and also accepts the canonical names, so the evaluator
+    consumes builder output through the same schema the builder emits. The
+    ``reference`` keeps its on-disk type (a dict for code/patch tasks) and is
+    never stringified.
+    """
+
+    def pick(canonical: str, legacy: str, default: Any = None) -> Any:
+        value = item.get(canonical)
+        if value is None:
+            value = item.get(legacy)
+        return default if value is None else value
+
+    return build_hidden_item(
+        task_id=str(pick("task_id", "question_id", "") or ""),
+        benchmark=str(item.get("benchmark", "") or ""),
+        prompt=str(pick("prompt", "question_text", "") or ""),
+        reference=pick("reference", "correct_answer", None),
+        task_type=str(item.get("task_type", "") or ""),
+        meta=item.get("meta") or {},
+        cached_model_answers=pick("cached_model_answers", "model_answers", {}) or {},
+        cached_model_scores=pick("cached_model_scores", "model_scores", {}) or {},
+    )
