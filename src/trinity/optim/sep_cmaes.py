@@ -16,6 +16,10 @@ Design notes (docs/SPEC.md §5):
   zeros vector is used if ``x0`` is None.
 * ``sigma0 = 0.1`` by default; the coordinator L2-normalizes the hidden state so
   this step size stays well-behaved at the W=0 start.
+* Sampling is reproducible for **every** seed in ``[0, 2**32 - 1]``. pycma treats
+  a ``seed`` option of ``0``/``None`` as "seed from the clock", so this wrapper
+  seeds ``numpy.random`` itself and disables pycma's own seeding rather than
+  forwarding the value (see ``_PYCMA_SEED_DISABLED``).
 
 This module imports no torch and runs on CPU only. The expensive fitness
 function (real SLM + real pool LLMs) is injected by the caller via :func:`run`
@@ -27,6 +31,20 @@ import math
 from typing import Callable
 
 import numpy as np
+
+_MAX_NUMPY_SEED: int = 2**32 - 1
+
+# pycma's own doc for its `seed` option reads:
+#     "random number seed for `numpy.random`; `None` and `0` equate to `time`,
+#      `np.nan` means 'do nothing'"
+# So handing pycma our seed directly would make `seed=0` -- the default at every
+# level of this repo -- a wall-clock seed, silently destroying reproducibility.
+# Instead we pass NaN ("do nothing") and seed numpy ourselves. pycma implements an
+# honoured integer seed as exactly `np.random.seed(seed)`, so every seed it used to
+# accept keeps its byte-identical sampling stream; only `0` changes, from
+# clock-seeded to deterministic like any other value.
+_PYCMA_SEED_DISABLED: float = float("nan")
+
 
 def _import_cma():
     """Import pycma lazily, so this module (and trinity.optim) imports cleanly on
@@ -96,14 +114,22 @@ class SepCMAES:
                 a non-zero identity start is desired).
             popsize: Population size ``lambda``. If None, computed via
                 :func:`default_popsize` (n=13312 -> 33).
-            seed: RNG seed for reproducible sampling.
+            seed: RNG seed for reproducible sampling. Every value in
+                ``[0, 2**32 - 1]`` is honoured, ``0`` included; two optimizers
+                built with the same seed sample identical populations. Seeding
+                sets the global ``numpy.random`` state.
             maxiter: Maximum number of generations ``T`` (TRINITY default 60).
 
         Raises:
-            ValueError: If ``x0`` is provided with a shape other than ``(n,)``.
+            ValueError: If ``x0`` is provided with a shape other than ``(n,)``,
+                or if ``seed`` is outside ``[0, 2**32 - 1]``.
         """
         if n < 1:
             raise ValueError(f"n must be >= 1, got {n}")
+        if not 0 <= int(seed) <= _MAX_NUMPY_SEED:
+            raise ValueError(
+                f"seed must be in [0, {_MAX_NUMPY_SEED}], got {seed}"
+            )
         self.n: int = int(n)
         self.sigma0: float = float(sigma0)
         self.seed: int = int(seed)
@@ -122,14 +148,20 @@ class SepCMAES:
         # `verbose=-9` silences pycma's stdout/file logging. Strategy constants
         # (c_sigma, d_sigma, c_1, c_mu, mu, recombination weights) all use the
         # library's separable defaults per docs/SPEC.md §5.3.
+        #
+        # Seeding: pycma would reinterpret seed 0 as "seed from the clock", so we
+        # seed numpy ourselves and tell pycma to leave the RNG alone (see
+        # `_PYCMA_SEED_DISABLED`). This mutates the global numpy RNG exactly as
+        # pycma already did for an honoured seed -- no new global side effect.
         opts = {
             "CMA_diagonal": True,
             "popsize": self._popsize,
-            "seed": self.seed,
+            "seed": _PYCMA_SEED_DISABLED,
             "maxiter": self.maxiter,
             "verbose": -9,
         }
         cma = _import_cma()
+        np.random.seed(self.seed)
         self._es = cma.CMAEvolutionStrategy(list(x0_vec), self.sigma0, opts)
 
         # Track the best-so-far in MAXIMIZATION space (so callers never see the
@@ -252,7 +284,8 @@ def run(
         sigma0: Initial step size.
         x0: Initial mean vector of shape ``(n,)``; defaults to ``zeros(n)``.
         popsize: Population size ``lambda``; defaults to :func:`default_popsize`.
-        seed: RNG seed.
+        seed: RNG seed. Honoured for every value in ``[0, 2**32 - 1]``, so two
+            runs with the same seed follow the same trajectory.
         maxiter: Maximum number of generations ``T``.
         verbose: If True, print a one-line summary per generation.
 
