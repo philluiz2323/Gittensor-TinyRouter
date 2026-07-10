@@ -21,7 +21,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-import yaml
 
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
@@ -94,45 +93,20 @@ def build_receipt(run_dir: Path, benchmark: str) -> dict:
 
 
 def extract_head_and_svf(run_dir: Path) -> tuple[np.ndarray, np.ndarray]:
-    """Load the coordinator, install best theta, extract head + SVF."""
-    from trinity.coordinator.policy import CoordinatorPolicy
+    """Extract head weights + SVF scales from best_theta.npy via θ unpack."""
     from trinity.coordinator import params as P
 
-    cfg = yaml.safe_load((_REPO / "configs" / "trinity.yaml").read_text())
-    cc = cfg["coordinator"]
-
-    print("Loading encoder on GPU (this may take a moment)...")
-    policy, spec = CoordinatorPolicy.build(
-        model_name=cc["encoder_model"],
-        device=cc.get("device", "cuda:0"),
-        dtype=cc.get("dtype", "bfloat16"),
-        target_layer=cc["svf"]["target_layer"],
-        svf_matrices=cc["svf"].get("matrices"),
-        n_models=3,
-        n_roles=3,
-        l2_normalize=cc["hidden_state"].get("l2_normalize", True),
-    )
+    spec = P.make_spec(n_a=6, d_h=1024, n_svf=P.DEFAULT_N_SVF)
 
     theta_path = run_dir / "best_theta.npy"
     if not theta_path.exists():
-        # Try without .npy extension patterns
         candidates = sorted(run_dir.glob("best_theta*"))
         if not candidates:
             raise FileNotFoundError(f"No best_theta found in {run_dir}")
         theta_path = candidates[-1]
 
     theta = np.load(str(theta_path))
-    policy.configure(theta, spec)
-
-    # Extract head weight from the LinearHead module
-    head_W = policy.head.weight.detach().cpu().float().numpy()
-
-    # Extract SVF scales
-    try:
-        svf_scales = policy.svf.current_scales()
-    except AttributeError:
-        svf_scales = np.ones(spec.n_svf, dtype=np.float32)
-
+    head_W, svf_scales = P.unpack(theta, spec)
     return head_W.astype(np.float32), svf_scales.astype(np.float32)
 
 

@@ -160,9 +160,8 @@ def _load_submission(submission_dir: Path) -> Optional[Tuple[np.ndarray, np.ndar
 # Cached evaluation
 # ==========================================================================
 
-def _evaluate_cached(head, encoder, items: List[dict], pool_model_names: List[str]) -> float:
-    """Evaluate a head on cached benchmark items. Returns accuracy [0, 1]."""
-    import torch
+def _evaluate_cached(policy, items: List[dict], pool_model_names: List[str]) -> float:
+    """Evaluate a configured policy on cached benchmark items. Returns accuracy [0, 1]."""
     from trinity.adapters.hidden_item import from_protocol_item
     from trinity.orchestration.reward import score_text
 
@@ -172,9 +171,7 @@ def _evaluate_cached(head, encoder, items: List[dict], pool_model_names: List[st
     correct = 0
     for item in items:
         canonical = from_protocol_item(item)
-        h_np = encoder.encode(canonical["prompt"])
-        h_t = torch.as_tensor(np.asarray(h_np, dtype=np.float32), device=head.weight.device)
-        agent_idx, _role, _dbg = head.select(h_t, sample=False)
+        agent_idx, _role = policy.decide(canonical["prompt"], sample=False)
         model_name = pool_model_names[agent_idx % len(pool_model_names)]
         cached = canonical["cached_model_answers"].get(model_name, "")
         if score_text(canonical["benchmark"] or "math500", cached, canonical["reference"]) > 0.0:
@@ -491,21 +488,22 @@ async def evaluate_pr(pr_number: int, benchmark: str,
         n_models=3, n_roles=3,
         l2_normalize=cc["hidden_state"].get("l2_normalize", True),
     )
+    policy.configure(np.concatenate([
+        np.asarray(head_W, dtype=np.float64).ravel(),
+        np.asarray(svf_scales, dtype=np.float64).ravel(),
+    ]), spec)
+    head = policy.head
     encoder = policy.encoder
-
-    from trinity.coordinator.head import LinearHead
-    head = LinearHead(n_a=6, d_h=1024, n_models=3).to(encoder.model.device)
-    head.load_weight(head_W)
 
     # ---- Cached eval ----
     print("[pr_eval] Running cached eval (150 questions)...")
     t0 = time.time()
-    hidden_acc = _evaluate_cached(head, encoder, eval_items, _POOL_MODELS)
+    hidden_acc = _evaluate_cached(policy, eval_items, _POOL_MODELS)
     print(f"  hidden_acc = {hidden_acc:.4f}  ({time.time() - t0:.1f}s)")
 
     # ---- Audit eval ----
     print("[pr_eval] Running audit eval (50 questions)...")
-    audit_acc = _evaluate_cached(head, encoder, audit_items, _POOL_MODELS) if audit_items else hidden_acc
+    audit_acc = _evaluate_cached(policy, audit_items, _POOL_MODELS) if audit_items else hidden_acc
     print(f"  audit_acc  = {audit_acc:.4f}")
 
     # ══════════════════════════════════════════════════════════════
@@ -524,10 +522,6 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     # ---- Live eval ----
     print("[pr_eval] Running live multi-turn eval (20 questions, real API calls)...")
     pool = OpenRouterPool(str(_REPO / "configs" / "models.yaml"))
-    policy.configure(np.concatenate([
-        np.asarray(head_W, dtype=np.float64).ravel(),
-        np.asarray(svf_scales, dtype=np.float64).ravel(),
-    ]), spec)
     live_acc, avg_turns = await _evaluate_live(policy, pool, _POOL_MODELS, live_items)
     print(f"  live_acc   = {live_acc:.4f}  avg_turns = {avg_turns:.2f}")
 
