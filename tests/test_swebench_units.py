@@ -200,9 +200,12 @@ def test_load_falls_back_to_toy_set_offline(monkeypatch):
 
 
 def test_load_shuffle_and_truncate_are_deterministic(monkeypatch):
+    # 20 upstream rows: the logical "test" split keeps the ~25% holdout (>= 3),
+    # so max_items=3 still truncates to exactly 3. See the SWE-bench holdout carve
+    # (single-split policy, mirrors GPQA #95).
     rows = [
         {"instance_id": f"i{i}", "problem_statement": "p", "repo": "r", "base_commit": "c"}
-        for i in range(6)
+        for i in range(20)
     ]
     _fake_datasets(monkeypatch, lambda path, split=None: rows)
     a = sb.load_swebench_tasks("test", max_items=3, seed=1)

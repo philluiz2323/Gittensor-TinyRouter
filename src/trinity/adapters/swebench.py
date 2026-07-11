@@ -32,6 +32,7 @@ from trinity.types import Task
 
 from .base import BenchmarkAdapter, ScoringMode, TaskType
 from .registry import register_adapter
+from .split_policy import resolve_split, select_holdout, warn_on_toy_fallback
 
 __all__ = [
     "BENCHMARK",
@@ -288,13 +289,32 @@ def _toy_swebench() -> list[Task]:
 def load_swebench_tasks(split: str, max_items: int | None, seed: int = 0) -> list[Task]:
     """Load SWE-bench Verified as a deterministic list of :class:`Task`.
 
+    SWE-bench Verified publishes a *single* upstream split (``test``, 500
+    instances). This follows the shared single-split policy (as GPQA does, issue
+    #95): the logical ``train`` split is resolved to the upstream ``test`` split,
+    then :func:`select_holdout` carves the loaded rows into disjoint ``train`` and
+    ``test`` subsets so training and evaluation never overlap. Previously a
+    ``train`` load asked HuggingFace for a non-existent ``train`` split, which
+    raised and silently fell back to the one-item toy set (real data discarded,
+    no warning).
+
     Tries HuggingFace (lazy/guarded); on any failure falls back to the built-in
-    toy set. Applies a ``seed``-seeded shuffle and truncates to ``max_items``, so
-    repeated calls with identical arguments return identical lists.
+    toy set with a :class:`~trinity.adapters.split_policy.ToyFallbackWarning`.
+    Applies a ``seed``-seeded shuffle and truncates to ``max_items``, so repeated
+    calls with identical arguments return identical lists.
     """
     import random
 
-    tasks = _hf_swebench(split) or _toy_swebench()
+    logical_split = (split or "test").strip().lower()
+    resolved_split = resolve_split(BENCHMARK, logical_split)
+    loaded = _hf_swebench(resolved_split)
+    used_toy = not loaded
+    # Single-split benchmark: carve the loaded rows into the requested logical
+    # half. ``select_holdout`` returns a fresh list and is a no-op for benchmarks
+    # with no holdout configured, so this stays safe if the toy set is used.
+    tasks = select_holdout(BENCHMARK, logical_split, loaded) if loaded else _toy_swebench()
+    warn_on_toy_fallback(BENCHMARK, logical_split, used_toy=used_toy)
+
     rng = random.Random(seed)
     tasks = list(tasks)
     rng.shuffle(tasks)
