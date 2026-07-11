@@ -18,6 +18,29 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-11 — Novelty scored identical heads as maximally novel after a JSON round-trip  #mistake #decision
+
+**Context:** reading `novelty.normalize_decision` in the new novelty/routing-diversity analysis
+(issue #164).
+**Expected:** a routing decision persisted to JSON and reloaded compares equal to the live
+`(agent, role)` tuple — the function's docstring says the key "round-trips through JSON."
+**Actual:** it didn't. A normalized tuple key serialized to JSON reloads as a **list** (JSON has no
+tuple type), and `normalize_decision` only branched on `tuple` — a list fell through to
+`str([...])`, a different key. Two identical heads (one live tuples, one JSON-loaded lists) scored
+0.0 agreement / **1.0 novelty**.
+**Root cause:** `isinstance(decision, tuple)` misses the `list` shape that every pair takes after a
+JSON round-trip, so the element-wise enum→name normalization never ran and the whole list was
+stringified.
+**Fix / decision:** branch on `(tuple, list)` and normalize element-wise to a tuple, so a
+JSON-loaded `[0, "WORKER"]` becomes `(0, "WORKER")` and matches the live tuple. `[OUR CHOICE]`
+always return a tuple key (not a list) so the key stays hashable and stable across the round-trip.
+Novelty is 5% of the composite score and the reference is the king's persisted decisions, so a
+head that routes identically to the king was being handed full novelty credit it did not earn.
+**Follow-up:** the `reference is None` branch of `novelty_report` still returns `n_agree=0`
+alongside `agreement_rate=0.5`, which is internally inconsistent for any JSON consumer that
+recomputes agreement from `n_agree/n_questions`; harmless to the scalar novelty but worth
+tidying separately.
+
 ## 2026-07-10 — Rate-limit gate self-rejected a re-run of the same PR  #mistake #decision
 
 **Context:** reading the anti-cheat Gate 1 (`submission/gates.check_rate_limit`, called by

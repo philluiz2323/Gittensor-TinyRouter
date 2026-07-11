@@ -67,7 +67,11 @@ def normalize_decision(decision: Any) -> Decision:
                 return getattr(x, attr)
         return str(x)
 
-    if isinstance(decision, tuple):
+    # A pair may arrive as a tuple or, after a JSON round-trip, as a list (JSON
+    # has no tuple type). Normalize both to the same tuple key so a decision
+    # persisted to JSON still compares equal to the live ``(agent, role)`` tuple
+    # — the "round-trips through JSON" contract above.
+    if isinstance(decision, (tuple, list)):
         return tuple(_norm_one(x) for x in decision)
     return _norm_one(decision)
 
