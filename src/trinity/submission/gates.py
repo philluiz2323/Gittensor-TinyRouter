@@ -22,6 +22,7 @@ from trinity.submission.constants import (
     LEDGER_RECEIPT_COST_TOLERANCE_USD,
     MAX_WEIGHT_MAGNITUDE,
     MIN_TRAINING_COST_USD,
+    N_HEAD_MODELS,
     RATE_LIMIT_MAX_SUBMISSIONS,
     RATE_LIMIT_WINDOW_DAYS,
 )
@@ -167,6 +168,41 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a_arr, b_arr) / (na * nb))
 
 
+def routing_invariant_head(head_W: np.ndarray) -> Optional[np.ndarray]:
+    """Return a routing-behaviour view of a head for duplicate comparison.
+
+    ``LinearHead`` routes by argmax/softmax over two INDEPENDENT logit groups of
+    ``z = W·h``: agent rows ``[0:N_HEAD_MODELS)`` and role rows
+    ``[N_HEAD_MODELS:]``. Adding a common vector ``c`` to every row of a group
+    shifts that group's logits by the same scalar ``c·h`` for every input, so
+    both ``argmax`` and ``softmax`` are unchanged — the head routes identically.
+    Raw-weight cosine, however, is NOT invariant to that shift, so a plagiarised
+    head can be given an arbitrary per-group offset to drive the cosine far below
+    the gate threshold while behaving identically (issue #152).
+
+    Mean-centering each group's rows (subtracting the per-column mean across the
+    group) removes exactly that common-vector component, so an exact copy and any
+    of its shifted variants collapse to the same representation (cosine ``1.0``),
+    while genuinely different heads stay distinct.
+
+    Args:
+        head_W: A head weight matrix, expected shape ``(n_a, d_h)`` with
+            ``n_a > N_HEAD_MODELS``.
+
+    Returns:
+        The centered head flattened to 1-D, or ``None`` when ``head_W`` is not a
+        2-D head with more than ``N_HEAD_MODELS`` rows (not comparable).
+    """
+    W = np.asarray(head_W, dtype=np.float64)
+    if W.ndim != 2 or W.shape[0] <= N_HEAD_MODELS:
+        return None
+    centered = W.copy()
+    agent, role = centered[:N_HEAD_MODELS], centered[N_HEAD_MODELS:]
+    agent -= agent.mean(axis=0, keepdims=True)
+    role -= role.mean(axis=0, keepdims=True)
+    return centered.ravel()
+
+
 def check_duplicate(
     head_W: np.ndarray,
     svf_scales: np.ndarray,
@@ -177,12 +213,12 @@ def check_duplicate(
     leaderboard: dict[str, Any] | None = None,
     load_leaderboard: Callable[[], dict[str, Any]] | None = None,
 ) -> Optional[str]:
-    head = np.asarray(head_W, dtype=np.float64).ravel()
+    head = routing_invariant_head(head_W)
     svf = np.asarray(svf_scales, dtype=np.float64).ravel()
 
     def _match(other_hw: np.ndarray, other_sv: np.ndarray) -> Optional[tuple[float, float]]:
-        other_head = np.asarray(other_hw, dtype=np.float64).ravel()
-        if other_head.size != head.size:
+        other_head = routing_invariant_head(other_hw)
+        if head is None or other_head is None or other_head.size != head.size:
             return None
         h_sim = cosine_similarity(head, other_head)
         s_sim = cosine_similarity(svf, np.asarray(other_sv, dtype=np.float64).ravel())

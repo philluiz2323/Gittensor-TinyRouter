@@ -96,6 +96,57 @@ def test_mismatched_head_shape_is_skipped(tmp_path):
     assert err is None
 
 
+def _shift_head_per_group(head: np.ndarray, seed: int, scale: float = 5.0) -> np.ndarray:
+    """Copy a head, then add a common vector to each logit group's rows.
+
+    LinearHead argmax/softmax over each group is invariant to a per-group additive
+    shift, so this reproduces a rival's routing EXACTLY while changing the raw
+    weights arbitrarily (issue #152).
+    """
+    rng = np.random.default_rng(seed)
+    n_models = pr_eval._N_HEAD_MODELS
+    out = head.copy()
+    out[:n_models] += rng.normal(0, scale, head.shape[1])
+    out[n_models:] += rng.normal(0, scale, head.shape[1])
+    return out
+
+
+def test_routing_preserving_shift_is_caught(tmp_path):
+    """The #152 evasion: copy a head, add a per-group additive shift.
+
+    Raw-weight cosine drops far below 0.999, but the head routes identically on
+    every input, so the shift-invariant gate must still reject it as a duplicate.
+    """
+    head = _rand_head(1)
+    _write_submission(tmp_path, "alice", 1, head, _near_identity_svf(10))
+
+    attack = _shift_head_per_group(head, seed=7)
+    # Sanity: the raw cosine really is below threshold (old gate would pass it).
+    raw = pr_eval._cosine_similarity(head, attack)
+    assert raw < pr_eval._COPY_THRESHOLD, raw
+
+    err = pr_eval._check_duplicate(attack, _near_identity_svf(999, std=0.05),
+                                   tmp_path, "bob", 1)
+    assert err is not None and err.startswith("duplicate_of_alice_gen_1")
+
+
+def test_routing_invariant_head_collapses_the_shift():
+    """The centered representation is identical for a head and its shifted copy."""
+    head = _rand_head(2)
+    attack = _shift_head_per_group(head, seed=3)
+    sim = pr_eval._cosine_similarity(
+        pr_eval._routing_invariant_head(head),
+        pr_eval._routing_invariant_head(attack),
+    )
+    assert sim == pytest.approx(1.0, abs=1e-9)
+    # ...but two genuinely different heads stay distinct after centering.
+    other = pr_eval._cosine_similarity(
+        pr_eval._routing_invariant_head(_rand_head(2)),
+        pr_eval._routing_invariant_head(_rand_head(3)),
+    )
+    assert other < pr_eval._COPY_THRESHOLD
+
+
 def test_king_copy_is_caught(tmp_path, monkeypatch):
     """A head copied from the leaderboard king is rejected even with new SVF.
 

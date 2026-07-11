@@ -38,6 +38,7 @@ from trinity.submission.constants import (
     EXPECTED_TOTAL_PARAMS,
     MAX_WEIGHT_MAGNITUDE,
     MIN_TRAINING_COST_USD,
+    N_HEAD_MODELS,
     RATE_LIMIT_MAX_SUBMISSIONS,
     RATE_LIMIT_WINDOW_DAYS,
 )
@@ -47,6 +48,7 @@ from trinity.submission.gates import (
     cosine_similarity as _cosine_similarity,
     parse_utc_timestamp as _parse_utc_timestamp,
     rate_limit_entries as _rate_limit_entries,
+    routing_invariant_head as _routing_invariant_head,
     validate_ledger_receipt_cost,
     validate_receipt as _validate_receipt,
     validate_weights as _validate_weights,
@@ -64,6 +66,7 @@ _OVERFIT_PENALTY = 0.05
 _RATE_LIMIT_WINDOW_DAYS = RATE_LIMIT_WINDOW_DAYS
 _RATE_LIMIT_MAX_SUBMISSIONS = RATE_LIMIT_MAX_SUBMISSIONS
 _POOL_MODELS = list(DEFAULT_POOL_MODELS)
+_N_HEAD_MODELS = N_HEAD_MODELS
 
 
 # ==========================================================================
