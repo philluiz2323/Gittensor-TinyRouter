@@ -1,4 +1,4 @@
-"""Offline anti-cheat gates for routing-head submissions (pr_eval gates 1–5).
+"""Offline anti-cheat gates for routing-head submissions (pr_eval gates 1–7).
 
 These checks run with no GPU and no OpenRouter calls. ``scripts/pr_eval.py``
 imports this module; miners can run the same logic locally via
@@ -27,6 +27,7 @@ from trinity.submission.constants import (
     RATE_LIMIT_WINDOW_DAYS,
 )
 from trinity.submission.pack import SubmissionPack
+from trinity.submission.schema import validate_pack_schema, validate_theta_integrity
 
 __all__ = [
     "GateResult",
@@ -40,6 +41,8 @@ __all__ = [
     "cosine_similarity",
     "validate_receipt",
     "validate_ledger_receipt_cost",
+    "validate_pack_schema",
+    "validate_theta_integrity",
     "OFFLINE_GATES",
     "run_gate",
     "run_offline_gates",
@@ -389,12 +392,25 @@ def _gate_ledger_cost(pack: SubmissionPack, ctx: PreflightContext) -> Optional[s
     return validate_ledger_receipt_cost(pack.receipt, ctx.ledger_path)
 
 
+def _gate_pack_schema(pack: SubmissionPack, ctx: PreflightContext) -> Optional[str]:
+    if not pack.receipt:
+        return "receipt_missing"
+    return validate_pack_schema(pack.receipt, ctx.benchmark)
+
+
+def _gate_theta_integrity(pack: SubmissionPack, ctx: PreflightContext) -> Optional[str]:
+    del ctx
+    return validate_theta_integrity(pack.head_weights, pack.svf_scales)
+
+
 OFFLINE_GATES: tuple[SubmissionGate, ...] = (
     SubmissionGate("rate_limit", _gate_rate_limit),
     SubmissionGate("weights", _gate_weights),
     SubmissionGate("duplicate", _gate_duplicate),
     SubmissionGate("receipt", _gate_receipt),
     SubmissionGate("ledger_cost", _gate_ledger_cost),
+    SubmissionGate("pack_schema", _gate_pack_schema),
+    SubmissionGate("theta_integrity", _gate_theta_integrity),
 )
 
 

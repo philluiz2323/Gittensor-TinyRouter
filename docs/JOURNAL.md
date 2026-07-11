@@ -65,6 +65,22 @@ eval ever completes; if an eval reliably dies before producing a score, that PR'
 until it either succeeds on re-run or the week rolls over. Acceptable given the anti-probe goal,
 but worth revisiting if infra flakiness makes it common.
 
+## 2026-07-10 — Preflight gates 1–5 did not catch receipt schema drift or theta layout corruption  #finding #decision
+**Context:** extending ``trinity.submission`` after #104 merged the offline preflight CLI.
+**Expected:** miners discover wrong ``receipt.json`` benchmark fields or hand-edited
+weight packs before opening a PR.
+**Actual:** gates 1–5 checked rate limits, weight magnitudes, duplicates, receipt
+plausibility, and ledger/receipt cost — but not whether the receipt's
+``benchmark`` / ``pool_models`` / ``n_total`` matched the submission context, or
+whether ``head_weights.npy`` + ``svf_scales.npy`` round-tripped through the
+canonical ``coordinator.params`` θ layout.
+**Fix / decision:** add gate 6 (``pack_schema``) and gate 7 (``theta_integrity``)
+in ``trinity.submission.schema``, wire them into ``OFFLINE_GATES``,
+``scripts/preflight_submission.py``, and ``scripts/pr_eval.py`` before any GPU
+work. Document the seven-gate flow in ``SUBMITTING.md``. Covered by
+``tests/test_submission_schema.py``.
+**Follow-up:** none.
+
 ## 2026-07-10 — The hidden-benchmark build accepted toy data, then died pointing elsewhere  #mistake #gotcha #repro
 **Context:** #73 fixed MMLU's `train` split and wired `ToyFallbackWarning` into `load_split`. Checking what the *hidden-benchmark builder* does when that warning fires.
 **Expected:** `build_benchmark.py` refuses to seal a benchmark whose questions came from the 2-item offline toy set.

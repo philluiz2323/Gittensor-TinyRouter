@@ -27,6 +27,12 @@ from trinity.submission.gates import (
 )
 from trinity.submission.pack import SubmissionPack, load_submission_pack, parse_submission_identity
 from trinity.submission.preflight import PreflightReport, PreflightRunner, load_leaderboard_json
+from trinity.submission.schema import (
+    PackSchemaValidator,
+    ThetaIntegrityValidator,
+    validate_pack_schema,
+    validate_theta_integrity,
+)
 
 __all__ = [
     "DEFAULT_POOL_MODELS",
@@ -54,6 +60,10 @@ __all__ = [
     "run_gate",
     "run_offline_gates",
     "validate_ledger_receipt_cost",
+    "validate_pack_schema",
     "validate_receipt",
+    "validate_theta_integrity",
     "validate_weights",
+    "PackSchemaValidator",
+    "ThetaIntegrityValidator",
 ]
