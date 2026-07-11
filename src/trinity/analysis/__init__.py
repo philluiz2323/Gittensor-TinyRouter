@@ -20,6 +20,12 @@ from trinity.analysis.complementarity import (
     analyze,
     analyze_tensor,
 )
+from trinity.analysis.convergence import (
+    RunConvergence,
+    analyze_run,
+    analyze_runs,
+    render,
+)
 from trinity.analysis.significance import (
     InvariantSignificance,
     PairedComparison,
@@ -41,6 +47,10 @@ __all__ = [
     "PerModelComplementarity",
     "analyze",
     "analyze_tensor",
+    "RunConvergence",
+    "analyze_run",
+    "analyze_runs",
+    "render",
     "InvariantSignificance",
     "PairedComparison",
     "assess_invariants",
