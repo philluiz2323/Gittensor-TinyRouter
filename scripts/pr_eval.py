@@ -166,9 +166,18 @@ def _load_submission(submission_dir: Path) -> Optional[Tuple[np.ndarray, np.ndar
 # ==========================================================================
 
 def _evaluate_cached(policy, items: List[dict], pool_model_names: List[str]) -> float:
-    """Evaluate a configured policy on cached benchmark items. Returns accuracy [0, 1]."""
+    """Evaluate a configured policy on cached benchmark items. Returns accuracy [0, 1].
+
+    Scoring routes through the benchmark **adapter** (``adapter.score_output``)
+    rather than calling ``reward.score_text`` directly (issue #154), so the
+    maintainer scorer honours the same adapter contract the rest of the repo
+    advertises. For math/mmlu/gpqa/livecodebench the delegating adapter forwards to
+    ``score_text`` -- identical results -- while execution-aware benchmarks such as
+    SWE-bench Verified are graded through their own ``score_output`` (the patch
+    scorer) instead of being mis-dispatched.
+    """
+    from trinity.adapters import get_adapter
     from trinity.adapters.hidden_item import from_protocol_item
-    from trinity.orchestration.reward import score_text
     from trinity.orchestration.session import routing_transcript
 
     if not items:
@@ -180,7 +189,8 @@ def _evaluate_cached(policy, items: List[dict], pool_model_names: List[str]) -> 
         agent_idx, _role = policy.decide(routing_transcript(canonical["prompt"]), sample=False)
         model_name = pool_model_names[agent_idx % len(pool_model_names)]
         cached = canonical["cached_model_answers"].get(model_name, "")
-        if score_text(canonical["benchmark"] or "math500", cached, canonical["reference"]) > 0.0:
+        adapter = get_adapter(canonical["benchmark"] or "math500")
+        if adapter.score_output(cached, canonical["reference"]) > 0.0:
             correct += 1
 
     return correct / len(items)
@@ -194,10 +204,20 @@ async def _evaluate_live(
     policy, pool, pool_models, items: List[dict],
     max_turns: int = 5, max_tokens: int = 4096,
 ) -> Tuple[float, float]:
-    """Run full multi-turn eval with real API calls. Returns (accuracy, avg_turns)."""
+    """Run full multi-turn eval with real API calls. Returns (accuracy, avg_turns).
+
+    Live trajectories are graded through the benchmark **adapter**
+    (``adapter.score_trajectory``) rather than ``reward.score`` directly (issue
+    #154), so the maintainer live scorer uses the same adapter contract as the
+    main evaluator (``trinity.eval``) and can grade execution-aware benchmarks such
+    as SWE-bench Verified (whose adapter scores the final patch) end-to-end. The
+    adapter's default ``score_trajectory`` picks the committed answer across turns
+    and delegates to ``score_output`` -- the documented evaluator rule -- so
+    non-SWE benchmarks are scored exactly as ``trinity.eval`` scores them.
+    """
     import httpx
+    from trinity.adapters import get_adapter
     from trinity.adapters.hidden_item import from_protocol_item
-    from trinity.orchestration.reward import score
     from trinity.orchestration.session import run_trajectory
     from trinity.types import Task
 
@@ -229,7 +249,8 @@ async def _evaluate_live(
             total_turns += max_turns
             continue
         traj = result
-        if score(traj) > 0.0:
+        adapter = get_adapter(traj.task.benchmark or "math500")
+        if adapter.score_trajectory(traj) > 0.0:
             correct += 1
         total_turns += traj.n_turns
 

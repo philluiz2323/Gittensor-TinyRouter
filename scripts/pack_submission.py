@@ -92,6 +92,35 @@ def build_receipt(run_dir: Path, benchmark: str) -> dict:
     }
 
 
+def next_generation(submissions_dir: Path) -> int:
+    """Pick the next submission generation number for a miner directory.
+
+    Returns ``max(existing numeric generation) + 1``, considering ONLY
+    numerically-named subdirectories — so a gap in the numbering (a thrown-out
+    training run whose generation directory was deleted) or a stray non-generation
+    entry never causes a collision. A missing/empty directory yields ``1``.
+
+    Counting entries instead (``len(existing) + 1``) silently overwrites an
+    existing generation whenever the numbering is not contiguous: with gens
+    ``1`` and ``3`` present, a count gives ``3`` and clobbers the real gen 3,
+    whereas the correct next generation is ``4``.
+
+    Args:
+        submissions_dir: ``submissions/<miner-name>/`` (need not exist).
+
+    Returns:
+        The next free generation number (>= 1).
+    """
+    if not submissions_dir.exists():
+        return 1
+    nums = [
+        int(p.name)
+        for p in submissions_dir.iterdir()
+        if p.is_dir() and p.name.isdigit()
+    ]
+    return max(nums) + 1 if nums else 1
+
+
 def extract_head_and_svf(run_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     """Extract head weights + SVF scales from best_theta.npy via θ unpack."""
     from trinity.coordinator import params as P
@@ -133,9 +162,7 @@ def main() -> None:
     # Auto-detect generation number
     gen = args.generation
     if gen == 0:
-        submissions_dir = _REPO / "submissions" / miner_name
-        existing = sorted(submissions_dir.glob("*")) if submissions_dir.exists() else []
-        gen = len(existing) + 1
+        gen = next_generation(_REPO / "submissions" / miner_name)
 
     # Create submission directory
     sub_dir = _REPO / "submissions" / miner_name / str(gen)

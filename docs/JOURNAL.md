@@ -42,6 +42,26 @@ and matching the tuple of concrete exception types would silently miss a new fai
 self-consistency mode, where the hash was never recomputed from the sealed questions; `--append`
 should arguably be restricted to full `--dir` verification. Left for a separate change.
 
+## 2026-07-11 — pack_submission generation auto-detect overwrote an existing generation  #mistake #gotcha #repro
+
+**Context:** reading `scripts/pack_submission.py`'s auto-detect of the next submission generation
+(the `--generation 0` default path).
+**Expected:** packing a new head with auto-detect always lands in a fresh, unused
+`submissions/<name>/<gen>/` directory.
+**Actual:** `gen = len(existing) + 1` counts directory entries. With gens `1` and `3` present (gen 2
+thrown out and deleted — a normal occurrence), the count is `2 + 1 = 3`, so it packed into the
+existing `submissions/<name>/3/` and `mkdir(exist_ok=True)` silently **overwrote** that generation's
+head_weights.npy / svf_scales.npy / receipt.json. `glob("*")` also counted stray files
+(`README`, `.DS_Store`), inflating the count further.
+**Root cause:** the auto-detect assumed contiguous numbering and counted entries instead of taking
+the max generation. A gap or a non-generation entry shifts the detected number onto an existing one.
+**Fix / decision:** extract a pure `next_generation(submissions_dir)` helper that returns
+`max(numeric generation dirs) + 1` (or `1` when the dir is missing/empty), considering ONLY
+numerically-named subdirectories — so gaps and stray files can never cause a collision. Added
+`tests/test_pack_submission_generation.py` (pure pathlib, no torch): gap -> 4, contiguous -> 4,
+stray file/non-numeric dir ignored, single high gen 7 -> 8. Fixes #187.
+**Follow-up:** none — an explicit `--generation N` still overrides auto-detect unchanged.
+
 ## 2026-07-11 — Novelty scored identical heads as maximally novel after a JSON round-trip  #mistake #decision
 
 **Context:** reading `novelty.normalize_decision` in the new novelty/routing-diversity analysis

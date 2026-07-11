@@ -6,6 +6,7 @@ from trinity.optim.baselines import (
     budget_matched_candidates,
     run_random_search,
 )
+from trinity.optim.budget import AtomicEvalBudget, cmaes_budget, plan_generations
 from trinity.optim.sep_cmaes import SepCMAES, default_popsize, run
 
 __all__ = [
@@ -15,4 +16,7 @@ __all__ = [
     "RandomSearchTrainer",
     "budget_matched_candidates",
     "run_random_search",
+    "AtomicEvalBudget",
+    "cmaes_budget",
+    "plan_generations",
 ]

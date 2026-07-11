@@ -58,7 +58,11 @@ def test_evaluate_cached_uses_policy_svf():
         def decide(self, prompt, *, sample=False):
             self.calls += 1
             assert sample is False
-            return (1 if len(prompt) % 2 == 0 else 0, None)
+            # `_evaluate_cached` passes `routing_transcript(query)` (which prepends
+            # "QUERY:\n"), not the bare query, so route on the query CONTENT rather
+            # than the transcript's length: item "abc" -> deepseek (idx 0), the
+            # shorter "ab" item -> glm (idx 1). Both land on their correct answer.
+            return (0 if "abc" in prompt else 1, None)
 
     policy = _FakePolicy()
     items = [
