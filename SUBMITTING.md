@@ -63,6 +63,22 @@ submissions/your-name/1/
 └── README.md           # auto-generated submission summary
 ```
 
+### Step 2b: Preflight (recommended)
+
+Run the same offline anti-cheat gates as `pr_eval` **before** opening a PR.
+No GPU and no API calls are required:
+
+```bash
+export TRINITY_COST_LEDGER=~/trinity/cost_ledger.jsonl   # optional, gate 5
+python scripts/preflight_submission.py \
+    --submission your-name/1 \
+    --benchmark math500
+```
+
+Preflight runs seven offline gates: rate limit, weight sanity, duplicate
+detection, receipt plausibility, ledger/receipt cost match (when a ledger is
+provided), receipt schema/benchmark consistency, and theta pack/unpack integrity.
+
 ## Step 3: Submit
 
 1. **Fork** this repo and create a branch: `git checkout -b submission/your-name-gen1`

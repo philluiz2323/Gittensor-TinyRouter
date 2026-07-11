@@ -109,3 +109,64 @@ def test_load_labels(tmp_path):
     assert sp.shape == (2, 3)
     assert np.allclose(sp[0], [1.0, 0.0, 0.5])   # m_c solved 1 of 2
     assert np.allclose(sp[1], [0.0, 1.0, 0.0])
+
+
+def test_encode_queries_uses_the_coordinator_transcript_envelope(monkeypatch):
+    """Warm-start must encode the SAME turn-1 input the coordinator routes on.
+
+    The coordinator encodes ``session._transcript_text(query, [])`` (the
+    ``"QUERY:\n..."`` envelope), so warm-start fitting the head on the bare query
+    would optimise it on features it never sees at inference (issue #168). This
+    pins that ``encode_queries`` feeds the envelope, not the bare prompt. Offline:
+    a fake encoder is injected so no torch/GPU is needed.
+    """
+    import types
+
+    from trinity.orchestration.session import _transcript_text
+
+    seen: list[str] = []
+
+    class _RecordingEncoder:
+        def __init__(self, **kwargs):
+            pass
+
+        def encode(self, text):
+            seen.append(text)
+            return np.zeros(4, dtype=np.float32)
+
+    fake_slm = types.ModuleType("trinity.coordinator.slm")
+    fake_slm.CoordinatorEncoder = _RecordingEncoder
+    monkeypatch.setitem(sys.modules, "trinity.coordinator.slm", fake_slm)
+
+    prompts = ["What is 2+2?", "Solve for x: 3x = 9."]
+    feats = W.encode_queries(prompts, model_name="stub", device="cpu")
+
+    assert seen == [_transcript_text(p, []) for p in prompts]
+    # The fix: the encoder input is the envelope, NOT the bare query.
+    assert seen[0] != prompts[0]
+    assert seen[0].startswith("QUERY:\n")
+    assert feats.shape == (2, 4)
+
+
+def test_encode_queries_instruction_prefixes_inside_the_envelope(monkeypatch):
+    """A legacy ``instruction`` is applied to the query, then wrapped in the envelope."""
+    import types
+
+    from trinity.orchestration.session import _transcript_text
+
+    seen: list[str] = []
+
+    class _RecordingEncoder:
+        def __init__(self, **kwargs):
+            pass
+
+        def encode(self, text):
+            seen.append(text)
+            return np.zeros(4, dtype=np.float32)
+
+    fake_slm = types.ModuleType("trinity.coordinator.slm")
+    fake_slm.CoordinatorEncoder = _RecordingEncoder
+    monkeypatch.setitem(sys.modules, "trinity.coordinator.slm", fake_slm)
+
+    W.encode_queries(["2+2?"], model_name="stub", instruction="Hint: ")
+    assert seen == [_transcript_text("Hint: 2+2?", [])]

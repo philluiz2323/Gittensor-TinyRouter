@@ -330,3 +330,24 @@ def test_bootstrap_ci_brackets_point_estimate():
     pt, lo, hi = oc.bootstrap_ci(S, lambda s: oc.best_single(oc.p_hat(s))[0],
                                  n_boot=500, seed=0)
     assert lo <= pt <= hi
+
+
+def test_router_gap_closed_nan_when_negative_headroom():
+    # denom < 0 must not cancel with a below-baseline router into a huge positive.
+    g = oc.router_gap_closed(0.50, 0.548, 0.5444)
+    assert np.isnan(g)
+
+
+def test_router_gap_closed_uses_crossfit_baseline_regime():
+    # Smoke: compute_stats exposes best_single_crossfit and headroom shares that baseline.
+    rng = np.random.default_rng(0)
+    Q, M, K = 80, 3, 5
+    p_true = np.empty((Q, M))
+    easy = rng.random(Q) < 0.60
+    p_true[easy, :] = 0.9
+    p_true[~easy, :] = 0.1
+    S = (rng.random((Q, M, K)) < p_true[:, :, None]).astype(float)
+    stats = oc.compute_stats(S)
+    assert hasattr(stats, "best_single_crossfit")
+    assert stats.routing_headroom == pytest.approx(stats.routing_oracle - stats.best_single_crossfit)
+

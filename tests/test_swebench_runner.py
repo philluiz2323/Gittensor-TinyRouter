@@ -67,6 +67,57 @@ def _repo():
         shutil.rmtree(d, ignore_errors=True)
 
 
+@contextmanager
+def _repo_test_in_patch():
+    """Real SWE-bench shape: the FAIL_TO_PASS test is introduced by the gold
+    ``test_patch`` and does NOT exist at ``base_commit`` (issue #177).
+
+    Yields ``(dir, gold, wrong, ref)`` where ``ref`` carries a ``test_patch`` that
+    adds ``test_calc.py``; ``base_commit`` has only the (buggy) source, no tests.
+    """
+    d = tempfile.mkdtemp(prefix="swebench-tp-")
+    try:
+        _run(["git", "init", "-q"], d)
+        _run(["git", "config", "user.email", "t@t"], d)
+        _run(["git", "config", "user.name", "t"], d)
+        buggy = "def add(a, b):\n    return a - b\n"
+        (Path(d) / "calc.py").write_text(buggy)
+        _run(["git", "add", "-A"], d)
+        _run(["git", "commit", "-q", "-m", "init"], d)      # base: source only, NO test file
+        base = _run(["git", "rev-parse", "HEAD"], d).stdout.strip()
+
+        # Gold solution patch: fix `add` to a + b.
+        (Path(d) / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+        gold = _run(["git", "diff"], d).stdout
+        _run(["git", "checkout", "--", "calc.py"], d)
+
+        # Wrong solution: applies (adds a comment) but does not fix the bug.
+        (Path(d) / "calc.py").write_text("# helper\n" + buggy)
+        wrong = _run(["git", "diff"], d).stdout
+        _run(["git", "checkout", "--", "calc.py"], d)
+
+        # Gold test_patch: introduces test_calc.py::test_add as a NEW file.
+        (Path(d) / "test_calc.py").write_text(
+            "from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n"
+        )
+        _run(["git", "add", "-N", "test_calc.py"], d)       # intent-to-add -> new-file diff
+        test_patch = _run(["git", "diff"], d).stdout
+        _run(["git", "reset", "-q"], d)
+        (Path(d) / "test_calc.py").unlink()
+
+        ref = {
+            "repo": "octo/calc",
+            "base_commit": base,
+            "gold_patch": gold,
+            "test_patch": test_patch,
+            "fail_to_pass": ["test_calc.py::test_add"],
+            "pass_to_pass": [],
+        }
+        yield d, gold, wrong, ref
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _reset(d, base):
     _run(["git", "-C", d, "reset", "--hard", "-q", base], ".")
     _run(["git", "-C", d, "clean", "-fdq"], ".")
@@ -108,6 +159,36 @@ def test_wrong_patch_applies_but_fails_tests():
         assert res.applied is True          # the comment patch applies...
         assert res.passed is False          # ...but FAIL_TO_PASS still fails
         assert res.reason == "tests_failed"
+
+
+def test_gold_patch_resolves_when_fail_to_pass_test_is_only_in_test_patch():
+    # Real SWE-bench shape (issue #177): the FAIL_TO_PASS test does not exist at
+    # base_commit -- it is added by the gold test_patch. The runner must apply the
+    # test_patch, else even a correct fix scores 0 (the test can't be collected).
+    with _repo_test_in_patch() as (d, gold, _wrong, ref):
+        _reset(d, ref["base_commit"])
+        res = evaluate_patch(d, gold, ref)
+        assert res.passed is True
+        assert res.reason == "resolved"
+        assert res.reward == 1.0
+
+
+def test_wrong_patch_fails_when_test_is_in_test_patch():
+    with _repo_test_in_patch() as (d, _gold, wrong, ref):
+        _reset(d, ref["base_commit"])
+        res = evaluate_patch(d, wrong, ref)
+        assert res.applied is True
+        assert res.passed is False
+        assert res.reason == "tests_failed"
+
+
+def test_unapplyable_test_patch_is_a_clean_failure():
+    with _repo_test_in_patch() as (d, gold, _wrong, ref):
+        _reset(d, ref["base_commit"])
+        ref = {**ref, "test_patch": "diff --git a/z.py b/z.py\n--- a/z.py\n+++ b/z.py\n@@ -1 +1 @@\n-x\n+y\n"}
+        res = evaluate_patch(d, gold, ref)
+        assert res.passed is False
+        assert res.reason == "test_patch_did_not_apply"
 
 
 def test_non_applying_patch_is_clean_failure():

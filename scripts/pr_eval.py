@@ -38,6 +38,7 @@ from trinity.submission.constants import (
     EXPECTED_TOTAL_PARAMS,
     MAX_WEIGHT_MAGNITUDE,
     MIN_TRAINING_COST_USD,
+    N_HEAD_MODELS,
     RATE_LIMIT_MAX_SUBMISSIONS,
     RATE_LIMIT_WINDOW_DAYS,
 )
@@ -47,8 +48,11 @@ from trinity.submission.gates import (
     cosine_similarity as _cosine_similarity,
     parse_utc_timestamp as _parse_utc_timestamp,
     rate_limit_entries as _rate_limit_entries,
+    routing_invariant_head as _routing_invariant_head,
     validate_ledger_receipt_cost,
+    validate_pack_schema,
     validate_receipt as _validate_receipt,
+    validate_theta_integrity,
     validate_weights as _validate_weights,
 )
 
@@ -64,6 +68,7 @@ _OVERFIT_PENALTY = 0.05
 _RATE_LIMIT_WINDOW_DAYS = RATE_LIMIT_WINDOW_DAYS
 _RATE_LIMIT_MAX_SUBMISSIONS = RATE_LIMIT_MAX_SUBMISSIONS
 _POOL_MODELS = list(DEFAULT_POOL_MODELS)
+_N_HEAD_MODELS = N_HEAD_MODELS
 
 
 # ==========================================================================
@@ -164,6 +169,7 @@ def _evaluate_cached(policy, items: List[dict], pool_model_names: List[str]) -> 
     """Evaluate a configured policy on cached benchmark items. Returns accuracy [0, 1]."""
     from trinity.adapters.hidden_item import from_protocol_item
     from trinity.orchestration.reward import score_text
+    from trinity.orchestration.session import routing_transcript
 
     if not items:
         return 0.0
@@ -171,7 +177,7 @@ def _evaluate_cached(policy, items: List[dict], pool_model_names: List[str]) -> 
     correct = 0
     for item in items:
         canonical = from_protocol_item(item)
-        agent_idx, _role = policy.decide(canonical["prompt"], sample=False)
+        agent_idx, _role = policy.decide(routing_transcript(canonical["prompt"]), sample=False)
         model_name = pool_model_names[agent_idx % len(pool_model_names)]
         cached = canonical["cached_model_answers"].get(model_name, "")
         if score_text(canonical["benchmark"] or "math500", cached, canonical["reference"]) > 0.0:
@@ -247,65 +253,67 @@ def _compute_score(hidden_acc: float, live_acc: float, avg_turns: float,
 # Gate 7: Novelty Computation
 # ==========================================================================
 
-def _compute_novelty(head, encoder, eval_items: List[dict],
-                      pool_models: List[str]) -> float:
-    """Compute novelty by comparing routing decisions against the current king.
+def _king_submission_dir(
+    benchmark: str,
+    lb: dict,
+    submissions_root: Path,
+) -> Optional[Path]:
+    """Return the reigning submission directory for ``benchmark``, if any."""
+    bench_entry = lb.get("benchmarks", {}).get(benchmark, {})
+    king_miner = bench_entry.get("best_miner")
+    king_gen = bench_entry.get("best_generation", 0)
+    if not king_miner or not king_gen:
+        return None
+    king_dir = submissions_root / str(king_miner) / str(king_gen)
+    if not (king_dir / "head_weights.npy").exists() or not (king_dir / "svf_scales.npy").exists():
+        return None
+    return king_dir
 
-    Loads the current best head from the leaderboard, runs both heads on the
-    first min(50, len(eval_items)) questions, and returns 1.0 - agreement_rate.
 
-    If there is no king yet, returns 0.5 (neutral).
-    """
-    lb = _load_leaderboard()
-    submissions_root = _REPO / "submissions"
-
-    # Find the current king
-    king_miner = None
-    king_gen = 0
-    for bench_name, bench_entry in lb.get("benchmarks", {}).items():
-        km = bench_entry.get("best_miner")
-        kg = bench_entry.get("best_generation", 0)
-        if km and kg:
-            king_miner = km
-            king_gen = kg
-            break
-
-    if not king_miner:
-        return 0.5  # no king yet — neutral novelty
-
-    king_dir = submissions_root / king_miner / str(king_gen)
-    hw_path = king_dir / "head_weights.npy"
-    if not hw_path.exists():
-        return 0.5
-
-    import torch
+def _routing_decisions(policy, items: List[dict], *, ref_count: int) -> List[tuple]:
+    """Collect turn-1 routing decisions via the configured policy."""
     from trinity.adapters.hidden_item import from_protocol_item
-    from trinity.coordinator.head import LinearHead
+    from trinity.orchestration.session import routing_transcript
+
+    decisions: List[tuple] = []
+    for item in items[:ref_count]:
+        canonical = from_protocol_item(item)
+        transcript = routing_transcript(canonical["prompt"])
+        agent_idx, role = policy.decide(transcript, sample=False)
+        decisions.append((agent_idx, role))
+    return decisions
+
+
+def _compute_novelty(
+    benchmark: str,
+    policy,
+    spec,
+    eval_items: List[dict],
+) -> float:
+    """Compare submitter vs benchmark king using full policy state (head + SVF)."""
+    from trinity.novelty import NEUTRAL_NOVELTY, novelty_score
+
+    lb = _load_leaderboard()
+    king_dir = _king_submission_dir(benchmark, lb, _REPO / "submissions")
+    ref_count = min(50, len(eval_items))
+    if king_dir is None or ref_count == 0:
+        return NEUTRAL_NOVELTY
 
     try:
-        king_hw = np.load(str(hw_path))
+        king_hw = np.load(str(king_dir / "head_weights.npy"))
+        king_svf = np.load(str(king_dir / "svf_scales.npy"))
     except (ValueError, OSError):
-        return 0.5
+        return NEUTRAL_NOVELTY
 
-    king_head = LinearHead(n_a=6, d_h=1024, n_models=3).to(head.weight.device)
-    king_head.load_weight(king_hw)
+    submitter_decisions = _routing_decisions(policy, eval_items, ref_count=ref_count)
+    king_theta = np.concatenate([
+        np.asarray(king_hw, dtype=np.float64).ravel(),
+        np.asarray(king_svf, dtype=np.float64).ravel(),
+    ])
+    policy.configure(king_theta, spec)
+    king_decisions = _routing_decisions(policy, eval_items, ref_count=ref_count)
 
-    # Compare routing decisions on reference questions
-    ref_count = min(50, len(eval_items))
-    matches = 0
-    for item in eval_items[:ref_count]:
-        canonical = from_protocol_item(item)
-        h_np = encoder.encode(canonical["prompt"])
-        h_t = torch.as_tensor(np.asarray(h_np, dtype=np.float32), device=head.weight.device)
-
-        sub_agent, sub_role, _ = head.select(h_t, sample=False)
-        king_agent, king_role, _ = king_head.select(h_t, sample=False)
-
-        if sub_agent == king_agent and sub_role == king_role:
-            matches += 1
-
-    agreement = matches / ref_count if ref_count > 0 else 0.0
-    return 1.0 - agreement
+    return novelty_score(submitter_decisions, king_decisions)
 
 
 # ==========================================================================
@@ -473,7 +481,21 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     if err:
         return _reject(err)
 
-    print("[pr_eval] All 5 pre-eval gates passed ✓\n")
+    # ══════════════════════════════════════════════════════════════
+    # GATE 6: Receipt schema / benchmark consistency (offline)
+    # ══════════════════════════════════════════════════════════════
+    err = validate_pack_schema(receipt, benchmark)
+    if err:
+        return _reject(err)
+
+    # ══════════════════════════════════════════════════════════════
+    # GATE 7: Theta pack/unpack integrity (offline)
+    # ══════════════════════════════════════════════════════════════
+    err = validate_theta_integrity(head_W, svf_scales)
+    if err:
+        return _reject(err)
+
+    print("[pr_eval] All 7 pre-eval gates passed ✓\n")
 
     # ══════════════════════════════════════════════════════════════
     # Load benchmark + encoder (GPU work starts here)
@@ -502,8 +524,6 @@ async def evaluate_pr(pr_number: int, benchmark: str,
         np.asarray(head_W, dtype=np.float64).ravel(),
         np.asarray(svf_scales, dtype=np.float64).ravel(),
     ]), spec)
-    head = policy.head
-    encoder = policy.encoder
 
     # ---- Cached eval ----
     print("[pr_eval] Running cached eval (150 questions)...")
@@ -538,7 +558,7 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     # ══════════════════════════════════════════════════════════════
     # GATE 7: Compute actual novelty
     # ══════════════════════════════════════════════════════════════
-    novelty = _compute_novelty(head, encoder, eval_items, _POOL_MODELS)
+    novelty = _compute_novelty(benchmark, policy, spec, eval_items)
     print(f"  novelty    = {novelty:.4f}")
 
     # ---- Composite score ----

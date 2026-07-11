@@ -69,7 +69,8 @@ fitness:
   enable_reweight: false   # variance-reweight tasks by population disagreement
   format_bonus: 0.05       # reward for producing a parseable answer (any correctness)
   turn_penalty: 0.05       # penalty proportional to (num_turns-1)/(max_turns-1)
-  hero_dense: false        # reserved: per-turn dense reward (currently unused)
+  hero_dense: false        # HERO dense self-consistency proxy, bucket-normalized (off)
+  hero_bonus: 0.05         # magnitude of the HERO in-bucket bonus (used iff hero_dense)
 
 baselines:                              # for the optimizer comparison (R8)
   enabled: [random_routing, static_best, rl_reinforce, imitation_sft]

@@ -223,7 +223,7 @@ def _load_livecodebench_hf(split: str) -> list[Task] | None:
                 prompt=str(question),
                 answer={
                     "tests": tests,
-                    "fn_name": _row_get(row, "fn_name", "func_name"),
+                    "fn_name": _lcb_fn_name(row),
                     "starter_code": _row_get(row, "starter_code"),
                 },
                 meta={
@@ -257,13 +257,42 @@ def _lcb_version_for_split(split: str) -> str:
     # Default / train -> V1 (the SPEC training split).
     return "release_v1"
 
+def _lcb_fn_name(row: Any) -> str | None:
+    """Resolve a LiveCodeBench functional entry-point (callable) name.
+
+    Prefer a top-level ``fn_name``/``func_name`` column; otherwise fall back to
+    the ``func_name`` stored inside the row's JSON ``metadata`` field, where the
+    ``code_generation_lite`` release keeps it. Returns ``None`` for stdin-style
+    problems (which have no entry point).
+    """
+    import json
+
+    name = _row_get(row, "fn_name", "func_name")
+    if name:
+        return str(name)
+    meta = _row_get(row, "metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (ValueError, TypeError):
+            meta = None
+    if isinstance(meta, dict):
+        fn = meta.get("func_name") or meta.get("fn_name")
+        if fn:
+            return str(fn)
+    return None
+
+
 def _parse_lcb_tests(row: Any) -> list[dict[str, str]]:
     """Best-effort extraction of LiveCodeBench public test cases.
 
     LiveCodeBench schemas vary across mirrors. We accept either a JSON-encoded
     string or an already-parsed list under several common keys, and normalise to
-    a list of ``{"input": ..., "output": ...}`` dicts. Returns ``[]`` if nothing
-    parseable is found (the reward checker treats empty tests as unscoreable).
+    a list of ``{"input": ..., "output": ..., "testtype": ...}`` dicts. The
+    ``testtype`` (``"stdin"`` or ``"functional"``) is preserved so the reward
+    checker can call the entry point for LeetCode-style problems instead of
+    mis-running them as stdin/stdout. Returns ``[]`` if nothing parseable is found
+    (the reward checker treats empty tests as unscoreable).
     """
     import json
 
@@ -282,7 +311,10 @@ def _parse_lcb_tests(row: Any) -> list[dict[str, str]]:
         if isinstance(case, dict):
             inp = case.get("input", case.get("stdin", ""))
             out = case.get("output", case.get("expected_output", ""))
-            tests.append({"input": str(inp), "output": str(out)})
+            testtype = case.get("testtype", case.get("type", ""))
+            tests.append(
+                {"input": str(inp), "output": str(out), "testtype": str(testtype)}
+            )
     return tests
 
 def _toy_tasks(benchmark: str) -> list[Task]:

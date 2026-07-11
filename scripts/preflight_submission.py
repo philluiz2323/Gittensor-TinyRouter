@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Run offline anti-cheat gates on a routing-head submission before opening a PR.
 
-Mirrors ``scripts/pr_eval.py`` gates 1–5 (rate limit, weights, duplicate,
-receipt plausibility, ledger/receipt cost consistency) with **no GPU** and
-**no OpenRouter API** calls. Use this after ``pack_submission.py`` to catch
-rejections locally.
+Mirrors ``scripts/pr_eval.py`` gates 1–7 (rate limit, weights, duplicate,
+receipt plausibility, ledger/receipt cost consistency, pack schema,
+theta integrity) with **no GPU** and **no OpenRouter API** calls. Use this
+after ``pack_submission.py`` to catch rejections locally.
 
 Usage::
 

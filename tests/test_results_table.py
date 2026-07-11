@@ -118,3 +118,72 @@ def test_trinity_still_wins_when_it_genuinely_beats_the_best_row():
     summary = _summary(rows)
     # TRINITY (0.80 + 0.70)/2 = 0.750 vs deepseek (0.72 + 0.60)/2 = 0.660
     assert "**R1/R2** (TRINITY avg > best fixed single avg): ✅ HOLDS (0.750 vs 0.660)" in summary
+
+
+# --------------------------------------------------------------------------- #
+# Partial coverage: a single model present on only SOME benchmarks is averaged
+# over its own (favorable) subset and must NOT be the "best fixed single".
+# --------------------------------------------------------------------------- #
+def _rowx(bench: str, coord: str, trinity: float, singles: dict, random_: float = 0.10) -> dict:
+    """An eval*.json row with an explicit multi-model ``singles`` map."""
+    best_model = max(singles, key=singles.get)
+    return {
+        "file": f"{bench}/{coord}/eval.json",
+        "benchmark": bench,
+        "coordinator": coord,
+        "variant": "eval",
+        "trinity": trinity,
+        "random": random_,
+        "best_single": singles[best_model],
+        "best_model": best_model,
+        "singles": dict(singles),
+    }
+
+
+def test_partial_coverage_single_is_excluded_from_best_fixed():
+    """A 1-of-2-bench model with a high score must not flip R1/R2.
+
+    gpt5 scores 0.90 but only on math500. Averaged over its own single benchmark it
+    looks like the best fixed single (0.900) and used to flip R1/R2 to ❌, even though
+    it was never run on mmlu. Only deepseek (full coverage, 0.525) is a valid
+    comparator, so the claim holds.
+    """
+    rows = [
+        _rowx("math500", "coordA", 0.60, {"deepseek": 0.50, "gpt5": 0.90}),
+        _rowx("mmlu", "coordA", 0.70, {"deepseek": 0.55}),
+    ]
+    summary = _summary(rows)
+    assert "| single: gpt5 (partial: 1/2 benches) | 0.900 |" in summary
+    assert "| single: deepseek (fixed) | 0.525 |" in summary
+    assert "**R1/R2** (TRINITY avg > best fixed single avg): ✅ HOLDS (0.650 vs 0.525)" in summary
+    # the buggy comparator (gpt5's subset 0.900) must not appear in the verdict
+    assert "0.900)" not in summary.split("**R1/R2**")[1].splitlines()[0]
+
+
+def test_r1r2_is_na_when_no_single_model_covers_all_benches():
+    """With no full-coverage single, there is no valid fixed baseline — don't fake one."""
+    rows = [
+        _rowx("math500", "coordA", 0.60, {"gpt5": 0.90}),
+        _rowx("mmlu", "coordA", 0.70, {"deepseek": 0.55}),
+    ]
+    summary = _summary(rows)
+    assert "| single: gpt5 (partial: 1/2 benches) | 0.900 |" in summary
+    assert "| single: deepseek (partial: 1/2 benches) | 0.550 |" in summary
+    # scope the check to the R1/R2 line (R4 legitimately holds at 0.650 vs random)
+    r1r2_line = summary.split("**R1/R2**")[1].splitlines()[0]
+    assert "N/A — no single model covers all 2 benchmarks" in r1r2_line
+    assert "HOLDS" not in r1r2_line and "❌" not in r1r2_line
+
+
+def test_full_coverage_multi_model_compares_only_full_models():
+    """Clean multi-model runs are unchanged: every model is full-coverage and compared."""
+    rows = [
+        _rowx("math500", "coordA", 0.60, {"deepseek": 0.50, "gpt5": 0.55}),
+        _rowx("mmlu", "coordA", 0.70, {"deepseek": 0.62, "gpt5": 0.40}),
+    ]
+    summary = _summary(rows)
+    # deepseek (0.50+0.62)/2 = 0.560 ; gpt5 (0.55+0.40)/2 = 0.475 -> best_fixed = 0.560
+    assert "| single: deepseek (fixed) | 0.560 |" in summary
+    assert "| single: gpt5 (fixed) | 0.475 |" in summary
+    assert "**R1/R2** (TRINITY avg > best fixed single avg): ✅ HOLDS (0.650 vs 0.560)" in summary
+    assert "partial" not in summary

@@ -190,13 +190,30 @@ def _committed_answer(benchmark: str, traj: Trajectory) -> str:
     return final
 
 
+def _answerful(benchmark: str, tr) -> bool:
+    """Whether turn ``tr`` may source a committed answer for ``benchmark``.
+
+    The single predicate behind both committed-answer selection
+    (:func:`_last_answerful_output`) and the HERO self-consistency vote
+    (:func:`answerful_non_verifier_outputs`), so "which turns can carry the
+    answer" is defined in exactly one place. A :attr:`~trinity.types.Role.VERIFIER`
+    turn is never eligible — the checker *discusses* answers (its pass-through
+    ``processed_output`` keeps the critique) but never commits one — and the turn
+    must carry an extractable answer (:func:`has_answer`).
+    """
+    if getattr(tr, "role", None) == Role.VERIFIER:
+        return False
+    txt = getattr(tr, "processed_output", "") or ""
+    return has_answer(benchmark, txt)
+
+
 def _last_answerful_output(
     benchmark: str, turns: Sequence, *, role: Role | None
 ) -> str | None:
     """Return the newest turn output that carries an extractable answer.
 
     Scans ``turns`` newest-first and returns the first ``processed_output`` that
-    :func:`has_answer` accepts for ``benchmark``.
+    :func:`_answerful` accepts for ``benchmark``.
     :attr:`~trinity.types.Role.VERIFIER` turns are always skipped — the Verifier
     checks the solution, it never sources the committed answer. When ``role`` is
     given only turns of that role are considered; when ``role`` is ``None`` every
@@ -212,15 +229,35 @@ def _last_answerful_output(
         carries an extractable answer.
     """
     for tr in reversed(turns):
-        tr_role = getattr(tr, "role", None)
-        if tr_role == Role.VERIFIER:
+        if not _answerful(benchmark, tr):
             continue
-        if role is not None and tr_role != role:
+        if role is not None and getattr(tr, "role", None) != role:
             continue
-        txt = getattr(tr, "processed_output", "") or ""
-        if has_answer(benchmark, txt):
-            return txt
+        return getattr(tr, "processed_output", "") or ""
     return None
+
+
+def answerful_non_verifier_outputs(benchmark: str, turns: Sequence | None) -> list[str]:
+    """Every non-verifier turn output carrying an extractable answer, in turn order.
+
+    The population the HERO self-consistency proxy votes over
+    (:func:`trinity.optim.fitness.hero_quality`). Shares :func:`_answerful` with
+    committed-answer selection, so a Verifier's critique can never enter the vote —
+    the same discipline :func:`_committed_answer` applies to the *reference* answer.
+
+    Args:
+        benchmark: Benchmark identifier (case-insensitive).
+        turns: The trajectory's turns, oldest-first (``None`` is treated as empty).
+
+    Returns:
+        The matching ``processed_output`` strings, oldest-first (possibly empty).
+    """
+    key = (benchmark or "").strip().lower()
+    return [
+        getattr(tr, "processed_output", "") or ""
+        for tr in (turns or [])
+        if _answerful(key, tr)
+    ]
 
 
 def has_answer(benchmark: str, text: str) -> bool:
@@ -404,10 +441,22 @@ def normalize_math_answer(ans: str | None) -> str:
     # and turns a correct dollar answer into a false negative.
     for tok in (r"\$", "$", r"\left", r"\right", r"\!", r"\,", r"\;", r"\:", r"\(", r"\)"):
         s = s.replace(tok, "")
-    s = re.sub(r"\\text\s*\{([^{}]*)\}", r"\1", s)
-    s = re.sub(r"\\mathrm\s*\{([^{}]*)\}", r"\1", s)
+    # Unwrap LaTeX font/style commands to their content. These change only how the
+    # answer looks, not its value, so \mathbf{5} must normalize to 5 exactly as
+    # \text{5}/\mathrm{5} already do (otherwise a bold-formatted answer is a false
+    # negative against a plain reference).
+    s = re.sub(
+        r"\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol)\s*\{([^{}]*)\}",
+        r"\1",
+        s,
+    )
     s = s.replace(r"\%", "").replace("%", "")
-    s = s.replace(r"^\circ", "").replace(r"\degree", "")
+    # Degree symbol in either brace form: ``^\circ`` and ``^{\circ}``. The braced
+    # form is common LaTeX and was previously left intact, so ``90^{\circ}`` never
+    # matched a plain ``90`` (a false negative). A caret is required, so a bare
+    # ``\circ`` (function composition) is untouched.
+    s = re.sub(r"\^\{?\\circ\}?", "", s)
+    s = s.replace(r"\degree", "")
     s = s.replace(r"\$", "")
     s = s.strip()
     if s.startswith("="):
@@ -680,20 +729,23 @@ def extract_code(text: str) -> str:
     return text.strip()
 
 
-def _coerce_test_spec(reference: object) -> tuple[list, int]:
-    """Normalize a code reference into ``(tests, timeout_s)``.
+def _coerce_test_spec(reference: object) -> tuple[list, int, str | None]:
+    """Normalize a code reference into ``(tests, timeout_s, fn_name)``.
 
     The ``Task.answer`` for code benchmarks may be:
       * a ``list`` of tests, or
-      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"``, or
+      * a ``dict`` with key ``"tests"``, optional ``"timeout_s"``, and optional
+        ``"fn_name"`` (the entry-point for LiveCodeBench *functional* tests), or
       * a JSON string encoding either of the above.
 
     Each test is one of:
       * a ``str`` of assert-based Python (executed after the candidate code), or
-      * a ``dict`` ``{"stdin": str, "expected_stdout": str}`` for I/O tests, or
+      * a ``dict`` ``{"stdin": str, "expected_stdout": str}`` for I/O tests, or a
+        ``{"input": str, "output": str, "testtype": "functional"}`` call test, or
       * a 2-tuple/list ``(stdin, expected_stdout)``.
     """
     timeout_s = 10
+    fn_name: str | None = None
     spec: object = reference
     if isinstance(spec, str):
         try:
@@ -702,6 +754,8 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
             spec = [spec]
     if isinstance(spec, dict):
         timeout_s = int(spec.get("timeout_s", timeout_s))
+        raw_fn = spec.get("fn_name") or spec.get("func_name")
+        fn_name = str(raw_fn) if raw_fn else None
         tests = spec.get("tests", [])
     else:
         tests = spec
@@ -709,7 +763,7 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
         tests = []
     if not isinstance(tests, list):
         tests = [tests]
-    return tests, timeout_s
+    return tests, timeout_s, fn_name
 
 
 def _check_code(candidate: str, reference: object) -> bool:
@@ -717,11 +771,13 @@ def _check_code(candidate: str, reference: object) -> bool:
     code = extract_code(candidate)
     if not code.strip():
         return False
-    tests, timeout_s = _coerce_test_spec(reference)
-    return run_pass_at_1(code, tests, timeout_s=timeout_s)
+    tests, timeout_s, fn_name = _coerce_test_spec(reference)
+    return run_pass_at_1(code, tests, timeout_s=timeout_s, fn_name=fn_name)
 
 
-def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
+def run_pass_at_1(
+    code: str, tests: Sequence, timeout_s: int = 10, *, fn_name: str | None = None
+) -> bool:
     """Execute candidate ``code`` against ``tests`` in a subprocess sandbox.
 
     The candidate code is **never** executed in-process. Each invocation writes
@@ -729,7 +785,7 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
     fresh subprocess with a wall-clock timeout. The candidate is judged to pass
     only if **every** test passes.
 
-    Two test flavors are supported (they may be mixed in one list):
+    Three test flavors are supported (they may be mixed in one list):
 
     * **assert-based** (``str``): arbitrary Python appended after the candidate
       code; a test passes if the script exits ``0`` with no exception. Use this
@@ -738,12 +794,19 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
       ``(stdin, expected_stdout)`` pair): the candidate is run as a program, fed
       ``stdin`` on standard input, and its stdout is compared (whitespace-
       trimmed per line) to ``expected_stdout``. Use this for competitive-
-      programming style benchmarks (LiveCodeBench).
+      programming style benchmarks (LiveCodeBench stdin problems).
+    * **functional** (``dict`` with ``"testtype": "functional"``): ``input`` holds
+      the call arguments (one JSON/literal value per line) and ``output`` the
+      expected return; the candidate is imported and ``fn_name`` (a top-level
+      function or a ``Solution`` method) is called with the parsed arguments, and
+      its return value is compared to the expected. Use this for LeetCode-style
+      LiveCodeBench problems, which otherwise score 0 when run as stdin/stdout.
 
     Args:
         code: Candidate Python source (already fence-stripped).
         tests: Sequence of tests as described above.
         timeout_s: Per-test wall-clock timeout in seconds.
+        fn_name: Entry-point name for functional tests (ignored otherwise).
 
     Returns:
         ``True`` iff the candidate passes all tests (and there is at least one
@@ -754,18 +817,30 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
     if not tests:
         return False
     for test in tests:
-        if not _run_one_test(code, test, timeout_s):
+        if not _run_one_test(code, test, timeout_s, fn_name=fn_name):
             return False
     return True
 
 
-def _run_one_test(code: str, test: object, timeout_s: int) -> bool:
+def _run_one_test(
+    code: str, test: object, timeout_s: int, *, fn_name: str | None = None
+) -> bool:
     """Run a single test in an isolated subprocess. Returns pass/fail."""
     stdin_data: str | None = None
     expected_stdout: str | None = None
     assert_block: str | None = None
 
     if isinstance(test, dict):
+        testtype = str(test.get("testtype", "")).strip().lower()
+        if testtype == "functional" and fn_name:
+            # LeetCode-style call test: parse args, invoke fn_name, compare return.
+            return _run_functional_test(
+                code,
+                str(test.get("input", test.get("stdin", ""))),
+                str(test.get("output", test.get("expected_stdout", ""))),
+                fn_name,
+                timeout_s,
+            )
         if (
             "stdin" in test
             or "input" in test
@@ -811,6 +886,66 @@ def _stdout_matches(got: str, expected: str) -> bool:
         ln.rstrip() for ln in expected.replace("\r\n", "\n").rstrip().split("\n")
     ]
     return got_lines == exp_lines
+
+
+def _parse_functional_value(raw: str) -> object:
+    """Parse a single LiveCodeBench functional value (a JSON or Python literal).
+
+    Functional test inputs/outputs are stored as text. Prefer JSON (the format
+    the ``code_generation_lite`` release uses), fall back to a Python literal, and
+    finally to the raw stripped string so an unparseable value still round-trips.
+    """
+    raw = raw.strip()
+    if raw == "":
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        pass
+    try:
+        import ast
+
+        return ast.literal_eval(raw)
+    except (ValueError, SyntaxError):
+        return raw
+
+
+def _parse_functional_args(raw: str) -> list:
+    """Parse LiveCodeBench functional call arguments (one value per line)."""
+    return [
+        _parse_functional_value(line)
+        for line in str(raw).split("\n")
+        if line.strip() != ""
+    ]
+
+
+def _run_functional_test(
+    code: str, raw_input: str, raw_expected: str, fn_name: str, timeout_s: int
+) -> bool:
+    """Score one LeetCode-style functional test by calling ``fn_name``.
+
+    Arguments and the expected return are parsed on the parent side and embedded
+    into the child script as Python literals (so the child never re-parses raw
+    text). The child resolves ``fn_name`` as a top-level function or a
+    ``Solution`` method, calls it with the parsed arguments, and asserts the
+    return equals the expected value; the process exits ``0`` iff it matches.
+    """
+    args = _parse_functional_args(raw_input)
+    expected = _parse_functional_value(raw_expected)
+    harness = (
+        f"\n\n_args = {args!r}\n"
+        f"_expected = {expected!r}\n"
+        f"_name = {str(fn_name)!r}\n"
+        "if _name in globals() and callable(globals()[_name]):\n"
+        "    _fn = globals()[_name]\n"
+        "elif 'Solution' in globals() and hasattr(Solution, _name):\n"
+        "    _fn = getattr(Solution(), _name)\n"
+        "else:\n"
+        "    raise SystemExit('functional entry point not found: ' + _name)\n"
+        "_got = _fn(*_args)\n"
+        "assert _got == _expected, 'got %r, expected %r' % (_got, _expected)\n"
+    )
+    return _exec_script(code + harness, stdin_data="", timeout_s=timeout_s)
 
 
 def _sandbox_env() -> dict[str, str]:

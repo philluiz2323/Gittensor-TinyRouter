@@ -1,6 +1,7 @@
 """Offline tests for novelty / routing-diversity analysis. No network, no GPU."""
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -34,6 +35,29 @@ def test_enum_like_decisions_compare_by_name():
 def test_scalar_and_pair_decisions_both_normalize():
     assert normalize_decision(2) == 2
     assert normalize_decision((1, "THINKER")) == (1, "THINKER")
+
+
+def test_list_pair_normalizes_like_tuple_pair():
+    # JSON has no tuple type, so a persisted (agent, role) pair reloads as a list.
+    assert normalize_decision([0, "WORKER"]) == normalize_decision((0, "WORKER"))
+    assert normalize_decision([0, "WORKER"]) == (0, "WORKER")
+
+
+def test_decision_key_round_trips_through_json():
+    key = normalize_decision((0, "WORKER"))
+    reloaded = json.loads(json.dumps(key))  # tuple -> JSON array -> list
+    assert normalize_decision(reloaded) == key
+
+
+def test_json_loaded_reference_agrees_with_live_tuple_head():
+    live = [(0, "WORKER"), (1, "THINKER"), (2, "VERIFIER")]
+    reference = json.loads(json.dumps(live))  # every pair is now a list
+    assert agreement_rate(live, reference) == 1.0
+    assert novelty_score(live, reference) == 0.0
+
+
+def test_genuinely_different_list_decisions_still_novel():
+    assert novelty_score([(0, "WORKER")], [[1, "WORKER"]]) == 1.0
 
 
 # ---------------------------------------------------------------------------

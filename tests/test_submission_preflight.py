@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from trinity.llm import cost_ledger as CL
-from trinity.submission.constants import EXPECTED_HEAD_SHAPE
+from trinity.submission.constants import EXPECTED_HEAD_SHAPE, EXPECTED_TOTAL_PARAMS
 from trinity.submission.gates import (
     GateResult,
     OFFLINE_GATES,
@@ -36,15 +36,19 @@ def _near_identity_svf(seed: int, std: float = 0.02) -> np.ndarray:
     return (1.0 + np.random.default_rng(seed).normal(0, std, _N_SVF)).astype(np.float32)
 
 
-def _honest_receipt(cost: float = 21.5) -> dict:
+def _honest_receipt(cost: float = 21.5, *, benchmark: str = "math500") -> dict:
     gens = [
         (0.30, 0.50, 0.50), (0.42, 0.58, 0.58), (0.39, 0.61, 0.61),
         (0.55, 0.69, 0.69), (0.58, 0.66, 0.69), (0.60, 0.72, 0.72),
     ]
     return {
+        "benchmark": benchmark,
+        "pool_models": ["qwen3.5-35b-a3b", "minimax-m3", "deepseek-v4-flash"],
+        "n_total": EXPECTED_TOTAL_PARAMS,
         "total_cost_usd": cost,
         "generations": len(gens),
         "best_fitness": 0.72,
+        "seed": 42,
         "fitness_history": [
             {"generation": i, "mean_fitness": m, "max_fitness": mx, "best_fitness": b}
             for i, (m, mx, b) in enumerate(gens)

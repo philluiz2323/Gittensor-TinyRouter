@@ -34,9 +34,56 @@ the max generation. A gap or a non-generation entry shifts the detected number o
 **Fix / decision:** extract a pure `next_generation(submissions_dir)` helper that returns
 `max(numeric generation dirs) + 1` (or `1` when the dir is missing/empty), considering ONLY
 numerically-named subdirectories — so gaps and stray files can never cause a collision. Added
-`tests/test_pack_submission_generation.py` (pure pathlib, no torch): gap → 4, contiguous → 4,
-stray file/non-numeric dir ignored, single high gen 7 → 8. Fixes #187.
+`tests/test_pack_submission_generation.py` (pure pathlib, no torch): gap -> 4, contiguous -> 4,
+stray file/non-numeric dir ignored, single high gen 7 -> 8. Fixes #187.
 **Follow-up:** none — an explicit `--generation N` still overrides auto-detect unchanged.
+
+## 2026-07-11 — Novelty scored identical heads as maximally novel after a JSON round-trip  #mistake #decision
+
+**Context:** reading `novelty.normalize_decision` in the new novelty/routing-diversity analysis
+(issue #164).
+**Expected:** a routing decision persisted to JSON and reloaded compares equal to the live
+`(agent, role)` tuple — the function's docstring says the key "round-trips through JSON."
+**Actual:** it didn't. A normalized tuple key serialized to JSON reloads as a **list** (JSON has no
+tuple type), and `normalize_decision` only branched on `tuple` — a list fell through to
+`str([...])`, a different key. Two identical heads (one live tuples, one JSON-loaded lists) scored
+0.0 agreement / **1.0 novelty**.
+**Root cause:** `isinstance(decision, tuple)` misses the `list` shape that every pair takes after a
+JSON round-trip, so the element-wise enum→name normalization never ran and the whole list was
+stringified.
+**Fix / decision:** branch on `(tuple, list)` and normalize element-wise to a tuple, so a
+JSON-loaded `[0, "WORKER"]` becomes `(0, "WORKER")` and matches the live tuple. `[OUR CHOICE]`
+always return a tuple key (not a list) so the key stays hashable and stable across the round-trip.
+Novelty is 5% of the composite score and the reference is the king's persisted decisions, so a
+head that routes identically to the king was being handed full novelty credit it did not earn.
+**Follow-up:** the `reference is None` branch of `novelty_report` still returns `n_agree=0`
+alongside `agreement_rate=0.5`, which is internally inconsistent for any JSON consumer that
+recomputes agreement from `n_agree/n_questions`; harmless to the scalar novelty but worth
+tidying separately.
+
+## 2026-07-10 — Cross-fit oracle tie-break favoured the LAST model, not model 0  #mistake #decision
+
+**Context:** reading `scripts/oracle_ceiling.crossfit_oracle_and_best` while checking the
+routing-headroom diagnostic that backs the R1/R2 verdict (issue #126).
+**Expected:** on an argmax tie over the selection half, the oracle picks model 0 — the
+docstring says "Argmax ties are broken by a tiny deterministic per-model jitter (model 0
+favoured)", and numpy's own `argmax` returns the lowest index on exact ties.
+**Actual:** it picked the LAST model. `jitter = np.linspace(0.0, 1e-9, M)` is an *increasing*
+ramp, so `argmax(sel + jitter)` adds the largest nudge to the highest index and overrides
+numpy's natural lowest-index tie-break.
+**Root cause:** wrong ramp direction. The jitter was meant to make near-ties deterministic
+while preserving model-0 preference, but increasing it inverts that preference.
+**Fix / decision:** `jitter = np.linspace(1e-9, 0.0, M)` (decreasing), so ties go to model 0 as
+documented. `[OUR CHOICE]` fix the code, not the docstring: model-0 is both the stated intent and
+numpy's convention. This is load-bearing, not cosmetic — selection-half ties are frequent at low
+K (`n_a = K//2` makes `sel` land on a coarse grid like {0, 0.5, 1}), and every tie was silently
+routed to the last-indexed pool model, injecting a pool-ordering bias into `routing_oracle` /
+`routing_headroom`. On a constructed tie-heavy input the raw oracle read 0.506 vs the correct
+1.0.
+**Follow-up:** the tie-break still favours a fixed index, which is fine for determinism but means
+the *raw* oracle is not pool-order-invariant on ties; `compute_stats` already floors the oracle at
+the cross-fit best_single, which masks most of the residual. A fully order-invariant tie-break
+(e.g. average over tied models) would be a larger change, deferred.
 
 ## 2026-07-10 — Rate-limit gate self-rejected a re-run of the same PR  #mistake #decision
 
@@ -61,6 +108,22 @@ count-everything behaviour so a miner sees their true status.
 eval ever completes; if an eval reliably dies before producing a score, that PR's slot is spent
 until it either succeeds on re-run or the week rolls over. Acceptable given the anti-probe goal,
 but worth revisiting if infra flakiness makes it common.
+
+## 2026-07-10 — Preflight gates 1–5 did not catch receipt schema drift or theta layout corruption  #finding #decision
+**Context:** extending ``trinity.submission`` after #104 merged the offline preflight CLI.
+**Expected:** miners discover wrong ``receipt.json`` benchmark fields or hand-edited
+weight packs before opening a PR.
+**Actual:** gates 1–5 checked rate limits, weight magnitudes, duplicates, receipt
+plausibility, and ledger/receipt cost — but not whether the receipt's
+``benchmark`` / ``pool_models`` / ``n_total`` matched the submission context, or
+whether ``head_weights.npy`` + ``svf_scales.npy`` round-tripped through the
+canonical ``coordinator.params`` θ layout.
+**Fix / decision:** add gate 6 (``pack_schema``) and gate 7 (``theta_integrity``)
+in ``trinity.submission.schema``, wire them into ``OFFLINE_GATES``,
+``scripts/preflight_submission.py``, and ``scripts/pr_eval.py`` before any GPU
+work. Document the seven-gate flow in ``SUBMITTING.md``. Covered by
+``tests/test_submission_schema.py``.
+**Follow-up:** none.
 
 ## 2026-07-10 — The hidden-benchmark build accepted toy data, then died pointing elsewhere  #mistake #gotcha #repro
 **Context:** #73 fixed MMLU's `train` split and wired `ToyFallbackWarning` into `load_split`. Checking what the *hidden-benchmark builder* does when that warning fires.

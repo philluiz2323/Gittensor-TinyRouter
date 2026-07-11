@@ -265,3 +265,105 @@ def build_manifest(
         "pool_models": list(pool_models or []),
         "created_at": created_at,
     }
+
+
+# --------------------------------------------------------------------------- #
+# 6. Verification — the read side of the integrity guarantee (issue-less gap:
+#    build_benchmark writes hash.txt/meta.json and docs/BENCHMARK_PROTOCOL.md
+#    promises they "let anyone verify the benchmark has not changed", but nothing
+#    consumed them). These reuse the canonical manifest_hash/build_manifest above,
+#    so a verifier can never drift from the builder's hashing.
+# --------------------------------------------------------------------------- #
+#: The one protocol version this build of the code understands.
+PROTOCOL_VERSION: int = 1
+
+
+def verify_meta_selfconsistent(meta: Mapping[str, Any]) -> list[str]:
+    """Check a ``meta.json`` manifest is internally consistent, using only itself.
+
+    Needs no questions (and so no decryption password): it validates the committed
+    public manifest against the frozen protocol constants and its own counts/ids —
+    enough to catch a tampered or mismatched manifest from the public file alone.
+
+    Returns:
+        A list of human-readable problems; an empty list means self-consistent.
+    """
+    problems: list[str] = []
+    pv = meta.get("protocol_version")
+    if pv != PROTOCOL_VERSION:
+        problems.append(f"protocol_version {pv!r} != {PROTOCOL_VERSION} (unknown protocol)")
+    so = meta.get("split_order")
+    if list(so or []) != list(SPLIT_ORDER):
+        problems.append(f"split_order {so!r} != {list(SPLIT_ORDER)}")
+    seed = meta.get("seed")
+    if seed != SEALED_SEED:
+        problems.append(f"seed {seed!r} != sealed seed {SEALED_SEED}")
+    ch = meta.get("content_hash")
+    if not (isinstance(ch, str) and len(ch) == 64 and all(c in "0123456789abcdef" for c in ch)):
+        problems.append(f"content_hash {ch!r} is not a 64-hex-char sha256 digest")
+
+    counts = meta.get("counts") or {}
+    ids = meta.get("question_ids") or {}
+    for name in SPLIT_ORDER:
+        idlist = list(ids.get(name) or [])
+        c = counts.get(name)
+        if c is not None and int(c) != len(idlist):
+            problems.append(f"counts[{name}]={c} != len(question_ids[{name}])={len(idlist)}")
+    seen: dict[str, str] = {}
+    for name in SPLIT_ORDER:
+        for qid in (ids.get(name) or []):
+            if qid in seen:
+                problems.append(f"question_id {qid!r} in both {seen[qid]} and {name} (splits overlap)")
+            else:
+                seen[qid] = name
+    return problems
+
+
+def verify_manifest(
+    meta: Mapping[str, Any],
+    splits: Mapping[str, Iterable[Mapping[str, Any]]],
+    *,
+    expected_hash: str | None = None,
+) -> list[str]:
+    """Verify the ACTUAL items reproduce the committed manifest (and optional hash.txt).
+
+    Recomputes the integrity hash, per-split counts, and sorted question-ids from the
+    real (decrypted) splits via :func:`manifest_hash` / :func:`build_manifest` — the
+    same functions the builder used — and compares them to ``meta`` and, if given, the
+    ``hash.txt`` value. Also confirms the actual splits are disjoint.
+
+    Returns:
+        A list of problems; empty means the built benchmark matches its manifest.
+    """
+    problems = list(verify_meta_selfconsistent(meta))
+    materialized = {name: list(splits.get(name, [])) for name in SPLIT_ORDER}
+
+    recomputed = manifest_hash(materialized)
+    if recomputed != meta.get("content_hash"):
+        problems.append(
+            f"recomputed content_hash {recomputed} != meta content_hash {meta.get('content_hash')}"
+        )
+    if expected_hash is not None and recomputed != expected_hash.strip():
+        problems.append(f"recomputed content_hash {recomputed} != hash.txt {expected_hash.strip()}")
+
+    rebuilt = build_manifest(str(meta.get("benchmark")), materialized,
+                             seed=int(meta.get("seed", SEALED_SEED)))
+    meta_counts = meta.get("counts") or {}
+    meta_ids = meta.get("question_ids") or {}
+    for name in SPLIT_ORDER:
+        if rebuilt["counts"][name] != meta_counts.get(name):
+            problems.append(
+                f"split {name}: actual count {rebuilt['counts'][name]} != meta {meta_counts.get(name)}"
+            )
+        if rebuilt["question_ids"][name] != list(meta_ids.get(name) or []):
+            problems.append(f"split {name}: actual question_ids do not match meta")
+
+    seen: dict[str, str] = {}
+    for name in SPLIT_ORDER:
+        for item in materialized[name]:
+            qid = str(item.get("question_id"))
+            if qid in seen:
+                problems.append(f"question_id {qid} in both {seen[qid]} and {name} (splits not disjoint)")
+            else:
+                seen[qid] = name
+    return problems

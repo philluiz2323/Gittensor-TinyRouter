@@ -8,6 +8,11 @@ EXPECTED_SVF_PARAMS: int = 7 * 1024
 EXPECTED_TOTAL_PARAMS: int = EXPECTED_HEAD_PARAMS + EXPECTED_SVF_PARAMS
 EXPECTED_HEAD_SHAPE: tuple[int, int] = (6, 1024)
 
+# Head rows [0:N_HEAD_MODELS) are agent logits, the rest are role logits. Each
+# group is argmax/softmax'd independently, so routing is invariant to a per-group
+# additive shift of the rows -- the duplicate gate must compare heads accordingly.
+N_HEAD_MODELS: int = 3
+
 MIN_TRAINING_COST_USD: float = 15.0
 MAX_WEIGHT_MAGNITUDE: float = 1e6
 DUPLICATE_HEAD_COSINE_THRESHOLD: float = 0.999

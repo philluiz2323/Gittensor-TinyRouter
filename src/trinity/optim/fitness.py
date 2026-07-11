@@ -47,6 +47,8 @@ __all__ = [
     "FitnessConfig",
     "shaped_reward",
     "variance_reweight",
+    "hero_quality",
+    "hero_bucket_bonus",
     "evaluate_candidate",
     "evaluate_population",
 ]
@@ -75,15 +77,22 @@ class FitnessConfig:
         turn_penalty: Reward subtracted in proportion to how many turns past the
             first the trajectory used (normalized to ``[0, 1]``). Default
             ``0.05``.
-        hero_dense: Reserved flag for a future per-turn ("hero") dense reward.
-            Currently unused by the shaping math; default ``False`` so behavior
-            is unchanged.
+        hero_dense: If ``True``, add the HERO dense quality proxy (improvement #3,
+            Stage A): a per-trajectory self-consistency score (:func:`hero_quality`)
+            min-max normalized *within* the correct and incorrect buckets and added
+            as a small bonus (:func:`hero_bucket_bonus`), so CMA-ES gets gradient
+            *within* each bucket while correctness stays the dominant term. Default
+            ``False`` so behavior is unchanged.
+        hero_bonus: Magnitude of the HERO in-bucket bonus (only used when
+            ``hero_dense`` is ``True``). Kept at the same ``0.05`` scale as the
+            other shaping terms so it never flips the correct-vs-wrong ordering.
     """
 
     enable_reweight: bool = False
     format_bonus: float = 0.05
     turn_penalty: float = 0.05
     hero_dense: bool = False
+    hero_bonus: float = 0.05
 
     @classmethod
     def from_dict(cls, cfg: dict | None) -> "FitnessConfig":
@@ -94,6 +103,7 @@ class FitnessConfig:
             format_bonus=float(cfg.get("format_bonus", 0.05)),
             turn_penalty=float(cfg.get("turn_penalty", 0.05)),
             hero_dense=bool(cfg.get("hero_dense", False)),
+            hero_bonus=float(cfg.get("hero_bonus", 0.05)),
         )
 
     @property
@@ -204,6 +214,94 @@ def _candidate_fitness(per_task: np.ndarray, weights: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
+# HERO dense self-consistency proxy (improvement #3, Stage A)
+# ---------------------------------------------------------------------------
+def _answers_agree(benchmark: str, a: str, b: str) -> bool:
+    """Whether two turn outputs express the same answer, per benchmark family.
+
+    Reuses the eval scorer's own extractors so "agreement" here means exactly what
+    "correct" means there: a choice letter, a math value (symbolic/numeric), or the
+    extracted code string. Unknown benchmarks fall back to a stripped-text match.
+    """
+    key = (benchmark or "").strip().lower()
+    if key in _reward.CHOICE_BENCHMARKS:
+        la = _reward.extract_choice_letter(a)
+        return la is not None and la == _reward.extract_choice_letter(b)
+    if key in _reward.MATH_BENCHMARKS:
+        na = _reward.extract_boxed(a) or _reward.extract_last_number(a)
+        nb = _reward.extract_boxed(b) or _reward.extract_last_number(b)
+        return na is not None and nb is not None and _reward.math_equal(na, nb)
+    if key in _reward.CODE_BENCHMARKS:
+        ca, cb = _reward.extract_code(a).strip(), _reward.extract_code(b).strip()
+        return bool(ca) and ca == cb
+    return bool(a.strip()) and a.strip() == b.strip()
+
+
+def hero_quality(traj) -> float:
+    """HERO self-consistency proxy in ``[0, 1]`` for one trajectory.
+
+    Of the trajectory's *non-verifier* answer-bearing turns
+    (:func:`reward.answerful_non_verifier_outputs`), the fraction whose answer
+    agrees with the committed answer (:func:`reward.committed_answer`). A
+    trajectory whose solver turns all reach the same answer is high quality
+    (``1.0``); one whose turns disagree is lower; one that never produced a
+    parseable answer is ``0.0``. Pure and torch-free.
+
+    Verifier turns are excluded from *both* the vote population and the committed
+    reference (see :func:`reward._committed_answer`), so the signal reflects what
+    the *solver* committed, never the checker's critique — the concern that closed
+    the first cut of this reward. This shapes only TRAINING fitness (via
+    :func:`hero_bucket_bonus`); the eval scorer never sees it.
+    """
+    benchmark = (traj.task.benchmark or "").strip().lower()
+    committed = _reward.committed_answer(benchmark, traj)
+    outs = _reward.answerful_non_verifier_outputs(benchmark, getattr(traj, "turns", None))
+    if not outs:
+        return 0.0
+    agree = sum(1 for txt in outs if _answers_agree(benchmark, txt, committed))
+    return agree / len(outs)
+
+
+def hero_bucket_bonus(qualities, corrects, cfg: FitnessConfig) -> np.ndarray:
+    """Min-max normalize the HERO quality WITHIN the correct/incorrect buckets.
+
+    Given per-trajectory ``qualities`` (from :func:`hero_quality`) and binary
+    ``corrects``, normalize the quality to ``[0, 1]`` separately inside the correct
+    bucket and the incorrect bucket, then scale by ``cfg.hero_bonus``. The result is
+    a non-negative per-trajectory bonus in ``[0, cfg.hero_bonus]``.
+
+    Because it is added on top of the binary correctness anchor, this gives CMA-ES
+    gradient *within* each bucket while a correct trajectory always outranks a wrong
+    one (the bonus magnitude is ``<= cfg.hero_bonus`` for both). A bucket whose
+    members share one quality value (or has a single member) gets a neutral ``0.5``
+    normalized score, so a degenerate bucket adds a constant and cannot spuriously
+    reorder candidates.
+
+    Args:
+        qualities: Per-trajectory HERO quality in ``[0, 1]``.
+        corrects: Per-trajectory binary correctness (``0``/``1``), same length.
+        cfg: The active :class:`FitnessConfig` (uses ``hero_bonus``).
+
+    Returns:
+        A ``[n]`` float array of bonuses, all ``0.0`` when ``hero_bonus == 0``.
+    """
+    q = np.asarray(qualities, dtype=float)
+    c = np.asarray(corrects, dtype=float)
+    bonus = np.zeros(q.shape[0], dtype=float)
+    if q.size == 0 or cfg.hero_bonus == 0.0:
+        return bonus
+    for bucket_mask in (c >= 0.5, c < 0.5):
+        idx = np.where(bucket_mask)[0]
+        if idx.size == 0:
+            continue
+        vals = q[idx]
+        lo, hi = float(vals.min()), float(vals.max())
+        norm = np.full(idx.size, 0.5) if hi <= lo else (vals - lo) / (hi - lo)
+        bonus[idx] = cfg.hero_bonus * norm
+    return bonus
+
+
+# ---------------------------------------------------------------------------
 # Trajectory -> per-task reward
 # ---------------------------------------------------------------------------
 def _task_reward(traj, cfg: FitnessConfig, max_turns: int) -> float:
@@ -299,17 +397,30 @@ async def evaluate_candidate(
 
     per_task: list[float] = []
     good_trajs = []
+    good_pos: list[int] = []
     n_failed = 0
     for t in trajs:
         if isinstance(t, BaseException):
             n_failed += 1
             per_task.append(0.0)
             continue
+        good_pos.append(len(per_task))
         per_task.append(_task_reward(t, cfg, max_turns))
         good_trajs.append(t)
     if n_failed:
         print(f"      [warn] {n_failed}/{len(trajs)} trajectories failed (counted as reward 0)",
               flush=True)
+
+    # HERO dense reward (improvement #3, Stage A): add the self-consistency quality,
+    # min-max normalized within the correct/incorrect buckets, as a small in-bucket
+    # bonus. Batch-level because the bucket normalization needs the whole minibatch.
+    # Failed trajectories (reward 0, no object) are excluded. TRAINING fitness only.
+    if cfg.hero_dense and good_trajs:
+        corrects = [float(getattr(t, "reward", 0.0) or 0.0) for t in good_trajs]
+        qualities = [hero_quality(t) for t in good_trajs]
+        bonuses = hero_bucket_bonus(qualities, corrects, cfg)
+        for pos, b in zip(good_pos, bonuses):
+            per_task[pos] += float(b)
 
     fit = float(mean(per_task)) if per_task else 0.0
     trajs_out = good_trajs if return_trajectories else []

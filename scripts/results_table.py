@@ -88,31 +88,61 @@ def render(rows: list[dict]) -> str:
         # then averaged over benchmarks. Reducing TRINITY with max while averaging the baselines
         # would compare a cherry-picked best against a mean and bias R1/R2 toward TRINITY.
         # best per-bench single score for each model (max across that bench's evals)
-        def single_avg(model):
+        n_benches = len(benches)
+
+        def single_avg(model: str) -> tuple[float | None, int]:
+            """Per-bench best for ``model`` averaged over the benches it covers.
+
+            Returns ``(average, n_covered)``. A single model need not appear on
+            every benchmark; we average only over the benches it *does* cover and
+            report how many that was, so the caller can tell a full-coverage fixed
+            baseline from a partial one. A partial model's average is taken over its
+            own — often favorable — subset of tasks and is NOT comparable to
+            TRINITY's all-benchmark average, so it is excluded from the R1/R2
+            comparator below.
+            """
             vals = []
             for b in benches:
                 bench_vals = [r["singles"].get(model) for r in by_bench[b] if model in r["singles"]]
                 bench_vals = [v for v in bench_vals if v is not None]
                 if bench_vals:
                     vals.append(max(bench_vals))
-            return sum(vals) / len(vals) if vals else None
+            if not vals:
+                return None, 0
+            return sum(vals) / len(vals), len(vals)
         # TRINITY per-task best (max TRINITY across coordinators per bench), averaged
-        trin_avg = sum(_bench_best(by_bench[b], "trinity") for b in benches) / len(benches)
+        trin_avg = sum(_bench_best(by_bench[b], "trinity") for b in benches) / n_benches
         # Random routing: per-bench best too, so R4 also compares like with like.
-        rand_avg = sum(_bench_best(by_bench[b], "random") for b in benches) / len(benches)
+        rand_avg = sum(_bench_best(by_bench[b], "random") for b in benches) / n_benches
         out.append(f"Averaged across {benches}:\n")
         out.append("| system | multi-task average |")
         out.append("|---|---|")
         out.append(f"| **TRINITY (per-task best coordinator)** | **{trin_avg:.3f}** |")
+        # Only a FULL-coverage single model is a valid "best fixed single" comparator
+        # for R1/R2 (SPEC R2: TRINITY > every single model on every task): a model
+        # missing from some benchmarks has no score on those tasks, so its subset-
+        # average — divided by its own coverage, not all benches — cannot be the best
+        # fixed single across every task and would spuriously flip the verdict.
+        full_cov_avgs = []
         for m in models:
-            sa = single_avg(m)
-            if sa is not None:
+            sa, n_cov = single_avg(m)
+            if sa is None:
+                continue
+            if n_cov == n_benches:
                 out.append(f"| single: {m} (fixed) | {sa:.3f} |")
+                full_cov_avgs.append(sa)
+            else:
+                out.append(f"| single: {m} (partial: {n_cov}/{n_benches} benches) | {sa:.3f} |")
         out.append(f"| random routing | {rand_avg:.3f} |")
-        best_fixed = max((single_avg(m) or 0) for m in models)
-        out.append(f"\n**R1/R2** (TRINITY avg > best fixed single avg): "
-                   f"{'✅ HOLDS' if trin_avg > best_fixed else '❌'} "
-                   f"({trin_avg:.3f} vs {best_fixed:.3f})")
+        if full_cov_avgs:
+            best_fixed = max(full_cov_avgs)
+            out.append(f"\n**R1/R2** (TRINITY avg > best fixed single avg): "
+                       f"{'✅ HOLDS' if trin_avg > best_fixed else '❌'} "
+                       f"({trin_avg:.3f} vs {best_fixed:.3f})")
+        else:
+            out.append("\n**R1/R2** (TRINITY avg > best fixed single avg): "
+                       f"N/A — no single model covers all {n_benches} benchmarks "
+                       f"({', '.join(benches)}), so there is no valid fixed-single comparator")
         out.append(f"**R4** (TRINITY avg > random avg): "
                    f"{'✅ HOLDS' if trin_avg > rand_avg else '❌'} ({trin_avg:.3f} vs {rand_avg:.3f})")
     return "\n".join(out) + "\n"

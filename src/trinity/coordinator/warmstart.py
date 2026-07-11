@@ -198,13 +198,23 @@ def encode_queries(prompts, *, model_name, device="cuda:0", dtype="bfloat16",
     ``target_layer`` is accepted for caller compatibility but NOT passed to the
     encoder: CoordinatorEncoder reads a fixed penultimate-token hidden state (the
     layer-26 ``target_layer`` is the SVF adapter's concern, not the feature's).
+
+    Each query is encoded through the SAME ``"QUERY:\\n..."`` transcript envelope
+    the coordinator routes on at turn 1 (``session._transcript_text(q, [])``), not
+    the bare query. The frozen SLM is causal and the feature is the penultimate
+    token's hidden state, so the envelope changes the feature; fitting the head on
+    the bare query would optimise it on a distribution it never sees at inference
+    (issue #168). ``instruction``, if given, is a legacy prefix applied to the
+    query text before it is wrapped.
     """
+    from ..orchestration.session import _transcript_text  # torch-free canonical formatter
     from .slm import CoordinatorEncoder  # lazy: pulls torch only when actually encoding
 
     enc = CoordinatorEncoder(model_name=model_name, device=device, dtype=dtype,
                              l2_normalize=l2_normalize)
     feats = []
     for q in prompts:
-        text = (instruction + q) if instruction else q
+        query = (instruction + q) if instruction else q
+        text = _transcript_text(query, [])
         feats.append(np.asarray(enc.encode(text), dtype=float).reshape(-1))
     return np.vstack(feats)

@@ -1,4 +1,4 @@
-"""Offline anti-cheat gates for routing-head submissions (pr_eval gates 1–5).
+"""Offline anti-cheat gates for routing-head submissions (pr_eval gates 1–7).
 
 These checks run with no GPU and no OpenRouter calls. ``scripts/pr_eval.py``
 imports this module; miners can run the same logic locally via
@@ -22,10 +22,12 @@ from trinity.submission.constants import (
     LEDGER_RECEIPT_COST_TOLERANCE_USD,
     MAX_WEIGHT_MAGNITUDE,
     MIN_TRAINING_COST_USD,
+    N_HEAD_MODELS,
     RATE_LIMIT_MAX_SUBMISSIONS,
     RATE_LIMIT_WINDOW_DAYS,
 )
 from trinity.submission.pack import SubmissionPack
+from trinity.submission.schema import validate_pack_schema, validate_theta_integrity
 
 __all__ = [
     "GateResult",
@@ -39,6 +41,8 @@ __all__ = [
     "cosine_similarity",
     "validate_receipt",
     "validate_ledger_receipt_cost",
+    "validate_pack_schema",
+    "validate_theta_integrity",
     "OFFLINE_GATES",
     "run_gate",
     "run_offline_gates",
@@ -167,6 +171,41 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a_arr, b_arr) / (na * nb))
 
 
+def routing_invariant_head(head_W: np.ndarray) -> Optional[np.ndarray]:
+    """Return a routing-behaviour view of a head for duplicate comparison.
+
+    ``LinearHead`` routes by argmax/softmax over two INDEPENDENT logit groups of
+    ``z = W·h``: agent rows ``[0:N_HEAD_MODELS)`` and role rows
+    ``[N_HEAD_MODELS:]``. Adding a common vector ``c`` to every row of a group
+    shifts that group's logits by the same scalar ``c·h`` for every input, so
+    both ``argmax`` and ``softmax`` are unchanged — the head routes identically.
+    Raw-weight cosine, however, is NOT invariant to that shift, so a plagiarised
+    head can be given an arbitrary per-group offset to drive the cosine far below
+    the gate threshold while behaving identically (issue #152).
+
+    Mean-centering each group's rows (subtracting the per-column mean across the
+    group) removes exactly that common-vector component, so an exact copy and any
+    of its shifted variants collapse to the same representation (cosine ``1.0``),
+    while genuinely different heads stay distinct.
+
+    Args:
+        head_W: A head weight matrix, expected shape ``(n_a, d_h)`` with
+            ``n_a > N_HEAD_MODELS``.
+
+    Returns:
+        The centered head flattened to 1-D, or ``None`` when ``head_W`` is not a
+        2-D head with more than ``N_HEAD_MODELS`` rows (not comparable).
+    """
+    W = np.asarray(head_W, dtype=np.float64)
+    if W.ndim != 2 or W.shape[0] <= N_HEAD_MODELS:
+        return None
+    centered = W.copy()
+    agent, role = centered[:N_HEAD_MODELS], centered[N_HEAD_MODELS:]
+    agent -= agent.mean(axis=0, keepdims=True)
+    role -= role.mean(axis=0, keepdims=True)
+    return centered.ravel()
+
+
 def check_duplicate(
     head_W: np.ndarray,
     svf_scales: np.ndarray,
@@ -177,12 +216,12 @@ def check_duplicate(
     leaderboard: dict[str, Any] | None = None,
     load_leaderboard: Callable[[], dict[str, Any]] | None = None,
 ) -> Optional[str]:
-    head = np.asarray(head_W, dtype=np.float64).ravel()
+    head = routing_invariant_head(head_W)
     svf = np.asarray(svf_scales, dtype=np.float64).ravel()
 
     def _match(other_hw: np.ndarray, other_sv: np.ndarray) -> Optional[tuple[float, float]]:
-        other_head = np.asarray(other_hw, dtype=np.float64).ravel()
-        if other_head.size != head.size:
+        other_head = routing_invariant_head(other_hw)
+        if head is None or other_head is None or other_head.size != head.size:
             return None
         h_sim = cosine_similarity(head, other_head)
         s_sim = cosine_similarity(svf, np.asarray(other_sv, dtype=np.float64).ravel())
@@ -353,12 +392,25 @@ def _gate_ledger_cost(pack: SubmissionPack, ctx: PreflightContext) -> Optional[s
     return validate_ledger_receipt_cost(pack.receipt, ctx.ledger_path)
 
 
+def _gate_pack_schema(pack: SubmissionPack, ctx: PreflightContext) -> Optional[str]:
+    if not pack.receipt:
+        return "receipt_missing"
+    return validate_pack_schema(pack.receipt, ctx.benchmark)
+
+
+def _gate_theta_integrity(pack: SubmissionPack, ctx: PreflightContext) -> Optional[str]:
+    del ctx
+    return validate_theta_integrity(pack.head_weights, pack.svf_scales)
+
+
 OFFLINE_GATES: tuple[SubmissionGate, ...] = (
     SubmissionGate("rate_limit", _gate_rate_limit),
     SubmissionGate("weights", _gate_weights),
     SubmissionGate("duplicate", _gate_duplicate),
     SubmissionGate("receipt", _gate_receipt),
     SubmissionGate("ledger_cost", _gate_ledger_cost),
+    SubmissionGate("pack_schema", _gate_pack_schema),
+    SubmissionGate("theta_integrity", _gate_theta_integrity),
 )
 
 

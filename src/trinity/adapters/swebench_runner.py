@@ -155,14 +155,19 @@ def evaluate_patch(
     """Grade ``candidate`` against ``reference`` in a **prepared** ``repo_dir``.
 
     ``repo_dir`` must already be a checked-out work-tree at the instance's
-    ``base_commit`` (see :func:`prepare_repo`). Steps: extract the diff, ``git
-    apply`` it, then run ``FAIL_TO_PASS`` + ``PASS_TO_PASS`` and require all to
-    pass. Never raises for a bad patch — a failure to apply or a failing test is a
-    clean ``passed=False`` result with a reason.
+    ``base_commit`` (see :func:`prepare_repo`). Steps: extract the model's diff,
+    ``git apply`` it, apply the gold ``test_patch``, then run ``FAIL_TO_PASS`` +
+    ``PASS_TO_PASS`` and require all to pass. Applying the test patch after the
+    solution mirrors SWE-bench's own harness: the ``FAIL_TO_PASS`` tests are
+    introduced by ``test_patch`` and do not exist at ``base_commit``, so without
+    this step they can never be collected and every patch — even the gold one —
+    fails (issue #177). Never raises for a bad patch — a failure to apply either
+    patch or a failing test is a clean ``passed=False`` result with a reason.
     """
     ref = reference if isinstance(reference, dict) else {}
     fail_to_pass = list(ref.get("fail_to_pass", []) or [])
     pass_to_pass = list(ref.get("pass_to_pass", []) or [])
+    test_patch = str(ref.get("test_patch", "") or "")
 
     patch = extract_patch(candidate)
     if not patch.strip():
@@ -171,6 +176,13 @@ def evaluate_patch(
     applied, apply_detail = apply_patch(repo_dir, patch, timeout=apply_timeout)
     if not applied:
         return PatchEvalResult(False, "patch_did_not_apply", applied=False, detail=apply_detail)
+
+    # Apply the gold test patch on top of the solution so the FAIL_TO_PASS tests
+    # (introduced by test_patch, absent at base_commit) exist in the work-tree.
+    if test_patch.strip():
+        t_applied, t_detail = apply_patch(repo_dir, test_patch, timeout=apply_timeout)
+        if not t_applied:
+            return PatchEvalResult(False, "test_patch_did_not_apply", applied=True, detail=t_detail)
 
     nodes = fail_to_pass + pass_to_pass
     if not nodes:
