@@ -26,6 +26,11 @@ from trinity.analysis.convergence import (
     analyze_runs,
     render,
 )
+from trinity.analysis.generalization import (
+    GeneralizationGap,
+    analyze_pair,
+    overfit_verdict,
+)
 from trinity.analysis.significance import (
     InvariantSignificance,
     PairedComparison,
@@ -51,6 +56,9 @@ __all__ = [
     "analyze_run",
     "analyze_runs",
     "render",
+    "GeneralizationGap",
+    "analyze_pair",
+    "overfit_verdict",
     "InvariantSignificance",
     "PairedComparison",
     "assess_invariants",
