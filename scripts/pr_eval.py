@@ -169,6 +169,7 @@ def _evaluate_cached(policy, items: List[dict], pool_model_names: List[str]) -> 
     """Evaluate a configured policy on cached benchmark items. Returns accuracy [0, 1]."""
     from trinity.adapters.hidden_item import from_protocol_item
     from trinity.orchestration.reward import score_text
+    from trinity.orchestration.session import routing_transcript
 
     if not items:
         return 0.0
@@ -176,7 +177,7 @@ def _evaluate_cached(policy, items: List[dict], pool_model_names: List[str]) -> 
     correct = 0
     for item in items:
         canonical = from_protocol_item(item)
-        agent_idx, _role = policy.decide(canonical["prompt"], sample=False)
+        agent_idx, _role = policy.decide(routing_transcript(canonical["prompt"]), sample=False)
         model_name = pool_model_names[agent_idx % len(pool_model_names)]
         cached = canonical["cached_model_answers"].get(model_name, "")
         if score_text(canonical["benchmark"] or "math500", cached, canonical["reference"]) > 0.0:
@@ -272,12 +273,12 @@ def _king_submission_dir(
 def _routing_decisions(policy, items: List[dict], *, ref_count: int) -> List[tuple]:
     """Collect turn-1 routing decisions via the configured policy."""
     from trinity.adapters.hidden_item import from_protocol_item
-    from trinity.orchestration.session import _transcript_text
+    from trinity.orchestration.session import routing_transcript
 
     decisions: List[tuple] = []
     for item in items[:ref_count]:
         canonical = from_protocol_item(item)
-        transcript = _transcript_text(canonical["prompt"], [])
+        transcript = routing_transcript(canonical["prompt"])
         agent_idx, role = policy.decide(transcript, sample=False)
         decisions.append((agent_idx, role))
     return decisions
@@ -289,12 +290,7 @@ def _compute_novelty(
     spec,
     eval_items: List[dict],
 ) -> float:
-    """Compare submitter vs benchmark king using full policy state (head + SVF).
-
-    Loads the reigning submission for the benchmark currently under evaluation
-    (not the first benchmark in leaderboard iteration order) and compares
-    turn-1 routing on the same QUERY transcript envelope training uses.
-    """
+    """Compare submitter vs benchmark king using full policy state (head + SVF)."""
     from trinity.novelty import NEUTRAL_NOVELTY, novelty_score
 
     lb = _load_leaderboard()
@@ -310,7 +306,6 @@ def _compute_novelty(
         return NEUTRAL_NOVELTY
 
     submitter_decisions = _routing_decisions(policy, eval_items, ref_count=ref_count)
-
     king_theta = np.concatenate([
         np.asarray(king_hw, dtype=np.float64).ravel(),
         np.asarray(king_svf, dtype=np.float64).ravel(),

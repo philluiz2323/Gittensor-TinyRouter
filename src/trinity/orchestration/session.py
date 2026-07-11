@@ -39,6 +39,15 @@ def _transcript_text(query: str, turns: list[TurnRecord]) -> str:
     return "\n\n".join(parts)
 
 
+def routing_transcript(query: str) -> str:
+    """Turn-1 coordinator input for routing (empty turn history).
+
+    Cached pr_eval and novelty must use the same text as ``run_trajectory``
+    on the first turn, not the bare benchmark prompt alone.
+    """
+    return _transcript_text(query, [])
+
+
 async def run_trajectory(
     task: Task,
     policy: Policy,
