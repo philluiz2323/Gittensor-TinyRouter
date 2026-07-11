@@ -143,11 +143,11 @@ def main() -> None:
             print("ERROR: --dir needs --password or BENCHMARK_PASSWORD")
             sys.exit(2)
         problems = verify_dir(args.dir, args.password)
-        meta = json.loads((Path(args.dir) / "meta.json").read_text())
+        meta_path = Path(args.dir) / "meta.json"
         mode = f"full: {args.dir}"
     elif args.meta:
         problems = verify_meta_file(args.meta)
-        meta = json.loads(Path(args.meta).read_text())
+        meta_path = Path(args.meta)
         mode = f"self-consistency: {args.meta}"
     else:
         print("ERROR: pass --dir <benchmark_dir> (full) or --meta <meta.json> (offline)")
@@ -159,6 +159,11 @@ def main() -> None:
             print(f"  - {p}")
         sys.exit(1)
 
+    # Reached only when verification passed, so meta.json exists and is well-formed
+    # (a missing/corrupt manifest is reported as a problem above). Reading it eagerly
+    # before this point crashed the verifier on the very case it exists to report —
+    # a build missing meta.json — instead of printing the FAIL report.
+    meta = json.loads(meta_path.read_text())
     print(f"OK [{mode}] — {meta.get('benchmark')} verified, hash {meta.get('content_hash')}")
     if args.append:
         wrote = append_hash(args.append, str(meta.get("benchmark")), str(meta.get("content_hash")))
