@@ -414,6 +414,56 @@ def extract_last_number(text: str) -> str | None:
     return matches[-1].replace(",", "").replace(" ", "")
 
 
+_FONT_COMMANDS = ("text", "mathrm", "mathbf", "mathit", "mathsf", "mathtt", "boldsymbol")
+
+
+def _unwrap_font_commands(s: str) -> str:
+    """Peel LaTeX font/style wrappers using balanced-brace scanning.
+
+    Font commands change only presentation, not value. Unlike the old single-level
+    ``[^{}]*`` regex, this handles braced payloads such as ``\\mathbf{\\frac{1}{2}}``.
+    Unbalanced wrappers are left untouched.
+    """
+    changed = True
+    while changed:
+        changed = False
+        for cmd in _FONT_COMMANDS:
+            marker = f"\\{cmd}"
+            idx = 0
+            while True:
+                pos = s.find(marker, idx)
+                if pos == -1:
+                    break
+                brace = pos + len(marker)
+                while brace < len(s) and s[brace] in " \t":
+                    brace += 1
+                if brace >= len(s) or s[brace] != "{":
+                    idx = pos + len(marker)
+                    continue
+                depth = 0
+                start = brace + 1
+                i = brace
+                end = -1
+                while i < len(s):
+                    ch = s[i]
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i
+                            break
+                    i += 1
+                if end == -1:
+                    idx = pos + len(marker)
+                    continue
+                inner = s[start:end]
+                s = s[:pos] + inner + s[end + 1 :]
+                changed = True
+                idx = pos + len(inner)
+    return s
+
+
 def normalize_math_answer(ans: str | None) -> str:
     r"""Normalize a math answer string for robust comparison.
 
@@ -445,11 +495,7 @@ def normalize_math_answer(ans: str | None) -> str:
     # answer looks, not its value, so \mathbf{5} must normalize to 5 exactly as
     # \text{5}/\mathrm{5} already do (otherwise a bold-formatted answer is a false
     # negative against a plain reference).
-    s = re.sub(
-        r"\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol)\s*\{([^{}]*)\}",
-        r"\1",
-        s,
-    )
+    s = _unwrap_font_commands(s)
     s = s.replace(r"\%", "").replace("%", "")
     # Degree symbol in either brace form: ``^\circ`` and ``^{\circ}``. The braced
     # form is common LaTeX and was previously left intact, so ``90^{\circ}`` never
