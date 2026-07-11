@@ -422,7 +422,9 @@ def normalize_math_answer(ans: str | None) -> str:
     ``\text{...}``, ``\%`` and trailing ``%``, ``^\circ``/``\degree``, a leading
     ``=``, surrounding ``\{...\}``, and outer whitespace. Collapses internal
     whitespace and lowercases. Converts ``a/b`` integer fractions and
-    ``\frac{a}{b}`` to a canonical ``Fraction`` string when possible.
+    ``\frac{a}{b}`` to a canonical ``Fraction`` string when possible, and folds
+    the constant pi (``\pi``, the Unicode ``π``, and a plain ``pi``) to one
+    canonical ``pi`` token.
 
     Args:
         ans: Raw answer text (or ``None``).
@@ -472,6 +474,17 @@ def normalize_math_answer(ans: str | None) -> str:
     s = re.sub(r"\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
     s = re.sub(r"\\[dt]?frac\s*(\d)\s*(\d)", r"\1/\2", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
+    # Canonicalize the constant pi to a bare ``pi`` token. Models and datasets
+    # write the same value three ways — the LaTeX ``\pi`` command, the Unicode
+    # glyph ``π`` (U+03C0), and a plain ``pi`` — so ``2\pi``, ``2π`` and ``2 pi``
+    # must all normalize identically (else a correct pi-valued answer is a false
+    # negative against a differently-spelled reference). ``pi`` is also the name
+    # sympy binds to the constant, so the symbolic fallback can then prove e.g.
+    # ``pi/2`` equal to ``\frac{\pi}{2}``. The negative lookahead keeps ``\pi`` a
+    # whole command (never a prefix of a longer ``\pi...`` macro); capital ``\Pi``
+    # (the product symbol) is intentionally left untouched.
+    s = re.sub(r"\\pi(?![a-zA-Z])", "pi", s)
+    s = s.replace("π", "pi")
     s = re.sub(r"\s+", "", s)
     # LaTeX digit grouping "1{,}000" -> "1,000" so the comma-strip below removes it
     # (a boxed answer like \boxed{2{,}048} otherwise never matches "2048").
