@@ -120,6 +120,52 @@ def _message_text(choice_message: dict) -> str:
     return str(content)
 
 
+def _parse_completion(data: dict, model: str) -> "ChatResult":
+    """Build a :class:`ChatResult` from an OpenAI-compatible response body.
+
+    OpenRouter can return **HTTP 200 with no usable completion**: a
+    content-moderation block (``{"choices": []}``), an upstream-error envelope
+    surfaced as 200 (no ``choices`` key at all), or a choice that carries no
+    ``message`` (reasoning/tool-only frames on some providers). Indexing
+    ``data["choices"][0]["message"]`` blindly raises ``IndexError``/``KeyError``
+    straight out of the retry and aborts the whole call.
+
+    Degrade an empty completion to ``text=""`` (``finish_reason="error"``) instead
+    of raising, while still surfacing the ``usage`` token counts so the caller can
+    bill them to the cost ledger — a moderated/empty response is still charged.
+
+    Args:
+        data: The parsed JSON response body.
+        model: The model id to stamp on the result (and the ledger entry).
+
+    Returns:
+        A :class:`ChatResult`; ``text`` is empty when no completion is present.
+    """
+    usage = data.get("usage") or {}
+    pt = int(usage.get("prompt_tokens", 0) or 0)
+    ct = int(usage.get("completion_tokens", 0) or 0)
+    choices = data.get("choices") or []
+    if not choices:
+        return ChatResult(
+            model=model,
+            text="",
+            prompt_tokens=pt,
+            completion_tokens=ct,
+            finish_reason="error",
+            raw=data,
+        )
+    choice = choices[0] or {}
+    message = choice.get("message") or {}
+    return ChatResult(
+        model=model,
+        text=_message_text(message),
+        prompt_tokens=pt,
+        completion_tokens=ct,
+        finish_reason=choice.get("finish_reason"),
+        raw=data,
+    )
+
+
 class OpenRouterPool:
     """Async-first client over the OpenRouter chat-completions endpoint."""
 
@@ -203,25 +249,17 @@ class OpenRouterPool:
             if resp.status_code in (429, 500, 502, 503, 504):
                 raise _Retryable(f"HTTP {resp.status_code}: {resp.text[:200]}")
             resp.raise_for_status()
-            data = resp.json()
-            choice = data["choices"][0]
-            # `data.get("usage", {})` only defaults an ABSENT key. OpenAI-compatible
-            # providers also send `"usage": null` (some providers, and 200s with an
-            # empty completion), which would make `usage.get(...)` raise on `None` --
-            # crashing an otherwise-successful call. `or {}` covers absent and null,
-            # matching how `_message_text` already guards `content: null`.
-            usage = data.get("usage") or {}
-            pt = usage.get("prompt_tokens", 0)
-            ct = usage.get("completion_tokens", 0)
-            _ledger_append(payload["model"], pt, ct)
-            return ChatResult(
-                model=payload["model"],
-                text=_message_text(choice["message"]),
-                prompt_tokens=pt,
-                completion_tokens=ct,
-                finish_reason=choice.get("finish_reason"),
-                raw=data,
-            )
+            try:
+                data = resp.json()
+            except ValueError:
+                # A 200 with a non-JSON body (proxy/CDN hiccup) must degrade to an
+                # empty completion, not crash the call out of the retry.
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            result = _parse_completion(data, payload["model"])
+            _ledger_append(result.model, result.prompt_tokens, result.completion_tokens)
+            return result
 
         if client is not None:
             return await _do(client)
