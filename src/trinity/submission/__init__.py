@@ -25,6 +25,11 @@ from trinity.submission.gates import (
     validate_receipt,
     validate_weights,
 )
+from trinity.submission.leaderboard import (
+    headroom_captured,
+    leaderboard_report,
+    verify_leaderboard,
+)
 from trinity.submission.pack import SubmissionPack, load_submission_pack, parse_submission_identity
 from trinity.submission.preflight import PreflightReport, PreflightRunner, load_leaderboard_json
 from trinity.submission.schema import (
@@ -35,6 +40,9 @@ from trinity.submission.schema import (
 )
 
 __all__ = [
+    "verify_leaderboard",
+    "leaderboard_report",
+    "headroom_captured",
     "DEFAULT_POOL_MODELS",
     "DUPLICATE_HEAD_COSINE_THRESHOLD",
     "EXPECTED_HEAD_SHAPE",
