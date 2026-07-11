@@ -50,6 +50,35 @@ def test_degenerate_run_no_improvement():
     assert r.improved is False and r.degenerate is True and r.net_gain == pytest.approx(0.0)
 
 
+def test_per_generation_collapse_is_degenerate_even_when_best_so_far_rises():
+    # best-so-far climbs 0.5->0.6 (a lucky early gen) while the population's actual
+    # objective J collapses 0.5->0.3. best-so-far is monotone so it can't flag this;
+    # the per-iteration signal must. This is the "converged to a bad policy" case.
+    r = analyze_run(
+        {"benchmark": "math500"}, _cma([0.5, 0.6, 0.6], means=[0.5, 0.4, 0.3])
+    )
+    assert r.improved is True          # best-so-far did rise
+    assert r.signal_drop == pytest.approx(0.2)
+    assert r.degenerate is True        # ...but J regressed -> degenerate
+
+
+def test_noisy_signal_that_nets_upward_is_not_degenerate():
+    # J fluctuates (0.3 -> 0.6 -> 0.5) but ends above where it started: not a collapse.
+    r = analyze_run(
+        {"benchmark": "math500"}, _cma([0.3, 0.6, 0.6], means=[0.3, 0.6, 0.5])
+    )
+    assert r.degenerate is False
+
+
+def test_collapsed_sep_cmaes_run_breaks_the_dod():
+    collapsed = analyze_run(
+        {"benchmark": "math500"}, _cma([0.5, 0.6, 0.6], means=[0.5, 0.4, 0.3])
+    )
+    cross = analyze_runs([collapsed])
+    assert cross["dod_drives_J_upward"] is False
+    assert cross["degenerate_runs"] == [collapsed.run_id]
+
+
 def test_empty_history_is_degenerate_zero():
     r = analyze_run({"benchmark": "gpqa"}, [])
     assert r.n_iters == 0 and r.degenerate is True
