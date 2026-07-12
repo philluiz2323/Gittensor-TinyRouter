@@ -26,6 +26,12 @@ from trinity.analysis.convergence import (
     analyze_runs,
     render,
 )
+from trinity.analysis.ensemble import (
+    EnsembleSummary,
+    answers_agree,
+    plurality_answer,
+)
+from trinity.analysis.ensemble import analyze as analyze_ensemble
 from trinity.analysis.generalization import (
     GeneralizationGap,
     analyze_pair,
@@ -63,6 +69,10 @@ __all__ = [
     "analyze_run",
     "analyze_runs",
     "render",
+    "EnsembleSummary",
+    "answers_agree",
+    "plurality_answer",
+    "analyze_ensemble",
     "GeneralizationGap",
     "analyze_pair",
     "overfit_verdict",
