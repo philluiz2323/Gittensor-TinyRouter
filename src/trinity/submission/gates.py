@@ -211,6 +211,29 @@ def routing_invariant_head(head_W: np.ndarray) -> Optional[np.ndarray]:
     return out.ravel()
 
 
+def _same_generation(a: str | int, b: str | int) -> bool:
+    """Whether two generation labels denote the same generation.
+
+    ``pr_eval`` identifies a submission's generation with ``int(parts[1])``, so a
+    non-canonical directory name (``07``, ``007``, ``+7``) is still accepted as the
+    integer it parses to. Comparing generations as strings here would then fail to
+    recognise a submission's own directory and flag it as a copy of itself. Compare
+    as integers when both parse, falling back to string equality for genuinely
+    non-numeric names.
+
+    Args:
+        a: A generation label (directory name ``str`` or ``int``).
+        b: The other generation label.
+
+    Returns:
+        ``True`` if the two denote the same generation.
+    """
+    try:
+        return int(a) == int(b)
+    except (TypeError, ValueError):
+        return str(a) == str(b)
+
+
 def check_duplicate(
     head_W: np.ndarray,
     svf_scales: np.ndarray,
@@ -237,7 +260,7 @@ def check_duplicate(
         if len(parts) < 2:
             continue
         other_miner, other_gen = parts[0], parts[1]
-        if other_miner == current_miner and other_gen == str(current_gen):
+        if other_miner == current_miner and _same_generation(other_gen, current_gen):
             continue
         hw_path = sub_dir / "head_weights.npy"
         sv_path = sub_dir / "svf_scales.npy"
