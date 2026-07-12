@@ -114,3 +114,72 @@ def test_pr_bot_detects_routing_submission_from_title_tag():
     )
     result = pr_bot.analyze_pr("[submission] miner-a gen 1 — math500", body, ["README.md"])
     assert result.is_routing_submission is True
+
+
+# --------------------------------------------------------------------------- #
+# Routing template: fields are filled INLINE (the shipped template's layout)
+# --------------------------------------------------------------------------- #
+def _inline_routing_body(cost: str = "$25.00") -> str:
+    return (
+        "## Type\n\n"
+        "- [x] **Routing head submission** — trained head\n\n"
+        "## Routing head submission\n\n"
+        "**Benchmark:** math500\n"
+        "**Miner name:** miner-a\n"
+        "**Generation:** 1\n"
+        "**Training method:** CMA-ES\n"
+        f"**Training cost:** {cost}\n"
+    )
+
+
+def test_inline_filled_routing_submission_has_no_template_violation():
+    # Regression: the PR template puts each value inline on the label line, and a
+    # correctly-filled submission must NOT be nagged as incomplete.
+    result = pr_bot.analyze_pr(
+        "[submission] miner-a gen 1", _inline_routing_body(),
+        ["submissions/miner-a/1/head_weights.npy"],
+    )
+    assert result.is_routing_submission is True
+    assert not any("Routing submission template" in v for v in result.template_violations)
+
+
+def test_next_line_filled_routing_submission_still_accepted():
+    body = (
+        "- [x] **Routing head submission**\n\n"
+        "**Benchmark:**\nmath500\n"
+        "**Miner name:**\nminer-a\n"
+        "**Generation:**\n1\n"
+        "**Training method:**\nCMA-ES\n"
+        "**Training cost:**\n$25.00\n"
+    )
+    assert pr_bot._routing_section_filled(body) is True
+
+
+def test_placeholder_routing_fields_are_flagged():
+    # The unedited template defaults ("(math500 or mmlu)", "$XX.XX ...") are placeholders.
+    body = (
+        "- [x] **Routing head submission**\n\n"
+        "**Benchmark:** (math500 or mmlu)\n"
+        "**Miner name:** (your miner identity)\n"
+        "**Generation:** (submission number)\n"
+        "**Training method:** (CMA-ES or other)\n"
+        "**Training cost:** $XX.XX (from cost ledger)\n"
+    )
+    assert pr_bot._routing_section_filled(body) is False
+    result = pr_bot.analyze_pr("[submission] x", body, ["submissions/x/1/head_weights.npy"])
+    assert any("Routing submission template" in v for v in result.template_violations)
+
+
+def test_empty_routing_field_does_not_bleed_into_next_label():
+    # An empty Benchmark field must count as unfilled, not be "filled" by the
+    # following **Miner name:** label.
+    body = (
+        "- [x] **Routing head submission**\n\n"
+        "**Benchmark:**\n\n"
+        "**Miner name:** miner-a\n"
+        "**Generation:** 1\n"
+        "**Training method:** CMA-ES\n"
+        "**Training cost:** $25.00\n"
+    )
+    assert pr_bot._field_value(body, r"\*\*benchmark:\*\*") is None
+    assert pr_bot._routing_section_filled(body) is False
