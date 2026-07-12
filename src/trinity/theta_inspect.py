@@ -50,8 +50,14 @@ class BlockStats:
 
     @property
     def n_moved(self) -> int:
-        """Entries that moved off their init value."""
-        return self.size - self.n_at_init
+        """Entries that moved off their init value (finite and off-init).
+
+        A non-finite entry is neither at-init nor moved — it is a separate
+        failure mode counted by :attr:`n_nonfinite`, so it must be excluded here.
+        Deriving this as ``size - n_at_init`` alone would count every NaN/Inf as
+        "moved" and falsely report an otherwise-at-init block as trained.
+        """
+        return self.size - self.n_at_init - self.n_nonfinite
 
     @property
     def frac_moved(self) -> float:

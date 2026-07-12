@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-11 — theta_inspect counted a NaN as a "moved" (trained) parameter  #mistake #gotcha #repro
+
+**Context:** reading the new `trinity.theta_inspect` (diagnoses whether a submission theta actually
+trained off its head=0 / svf=1 init, #226).
+**Expected:** a head still at its `W=0` init reports `head_trained=False` and raises the "routing is
+the uniform policy" warning — the module's whole purpose.
+**Actual:** `BlockStats.n_moved` was `size - n_at_init`. But `_block_stats` deliberately excludes
+non-finite entries from `n_at_init` ("a NaN never counts as unchanged"), so every NaN/Inf fell into
+`n_moved`, i.e. counted as "trained". A head of all-zeros with ONE NaN (a realistic divergence
+artifact) → `n_moved=1` → `head_trained=True`, and the uniform-policy warning was suppressed.
+Reproduced: `theta=initial_theta(); theta[0]=nan; inspect_theta(theta).head_trained` was `True`.
+**Root cause:** deriving `n_moved` by subtraction lumps the non-finite bucket (a separate failure
+mode, already counted by `n_nonfinite`) into "moved".
+**Fix / decision:** `n_moved = size - n_at_init - n_nonfinite`, so a non-finite entry is neither
+at-init nor moved (all three fields already stored — one-line property fix). `at_init`/`*_trained`/
+warnings then follow. Added `tests/test_theta_inspect_nonfinite_moved.py` (pure numpy): NaN-on-init
+head/svf → not trained + warning, genuinely-moved block still trained, mixed finite/non-finite
+counts, fully-non-finite block → not trained. Fixes #229.
+**Follow-up:** none.
 ## 2026-07-11 — Convergence DoD read the monotone best-so-far, so collapse was invisible  #mistake #decision
 
 **Context:** reading `analysis/convergence.py`, which checks the SPEC DoD "the optimizer drives
