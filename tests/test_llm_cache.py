@@ -218,3 +218,75 @@ def test_a_blank_env_var_does_not_enable_the_cache(monkeypatch):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+class _ErrorThenGoodPool:
+    """Returns a transient error on call 1, then a real answer on call 2."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.models = {"m-a": "vendor/m-a"}
+        self.decoding = {"temperature": 0.0}
+
+    def model_id(self, name: str) -> str:
+        return self.models[name]
+
+    async def chat(self, model, messages, *, temperature=0.7, top_p=0.95,
+                   max_tokens=4096, reasoning=None, **kwargs):
+        from trinity.llm.openrouter_client import ChatResult
+
+        self.calls.append((model, temperature))
+        if len(self.calls) == 1:  # transient moderation/empty/CDN failure as HTTP 200
+            return ChatResult(model=model, text="", prompt_tokens=12,
+                              completion_tokens=0, finish_reason="error", raw={})
+        return ChatResult(model=model, text="the answer is 4", prompt_tokens=10,
+                          completion_tokens=5, finish_reason="stop", raw={})
+
+
+def test_transient_error_completion_is_not_cached(tmp_path):
+    pool = _ErrorThenGoodPool()
+    cache = ResponseCache(tmp_path)
+    cp = CachedPool(pool, cache)
+    key = cache_key("m-a", MSGS, temperature=0.0, top_p=0.95, max_tokens=4096, reasoning=None)
+
+    first = asyncio.run(cp.chat("m-a", MSGS, temperature=0.0))
+    assert first.finish_reason == "error" and first.text == ""
+    assert len(pool.calls) == 1
+    assert cache.get(key) is None, "a transient error must never be cached"
+    assert cache.stats.skipped == 1 and cache.stats.writes == 0
+
+    # A retry issues a FRESH call and gets the real answer, which IS cached.
+    second = asyncio.run(cp.chat("m-a", MSGS, temperature=0.0))
+    assert second.text == "the answer is 4"
+    assert len(pool.calls) == 2
+    assert cache.get(key) is not None
+
+    # The now-cached real answer is served from disk (no new pool call).
+    third = asyncio.run(cp.chat("m-a", MSGS, temperature=0.0))
+    assert third.text == "the answer is 4"
+    assert len(pool.calls) == 2
+
+
+def test_blank_text_completion_is_skipped(tmp_path):
+    # An empty completion with finish_reason="stop" is still not a real answer.
+    class _BlankPool(_StubPool):
+        async def chat(self, model, messages, **kw):
+            from trinity.llm.openrouter_client import ChatResult
+
+            self.calls.append((model, kw.get("temperature")))
+            return ChatResult(model=model, text="  ", prompt_tokens=1,
+                              completion_tokens=0, finish_reason="stop", raw={})
+
+    pool = _BlankPool()
+    cache = ResponseCache(tmp_path)
+    cp = CachedPool(pool, cache)
+    asyncio.run(cp.chat("m-a", MSGS, temperature=0.0))
+    key = cache_key("m-a", MSGS, temperature=0.0, top_p=0.95, max_tokens=4096, reasoning=None)
+    assert cache.get(key) is None
+    assert cache.stats.skipped == 1
+
+
+def test_stats_to_dict_reports_skipped():
+    from trinity.llm.cache import CacheStats
+
+    assert CacheStats(skipped=3).to_dict()["skipped"] == 3
