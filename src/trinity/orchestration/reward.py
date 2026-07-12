@@ -673,6 +673,29 @@ def _ref_to_str(reference: object) -> str:
 # Multiple choice: MMLU / GPQA
 # ---------------------------------------------------------------------------
 # Match in priority order. Earlier patterns are more explicit / trustworthy.
+# LaTeX font/emphasis wrappers a model may put around the answer letter. Unwrapping
+# them before matching lets a boxed, formatted choice (``\boxed{\text{B}}``,
+# ``\boxed{\textbf{D}}``, ``\mathbf{C}``) be read exactly as a bare ``B``/``D``/``C``
+# — the same commands ``normalize_math_answer`` already strips on the math path
+# (issue #12 widened choices to A-J but the extractor never saw the wrapped letter).
+_CHOICE_FONT_CMD_RE = re.compile(
+    r"\\(?:text|textbf|textit|textrm|emph|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol)"
+    r"\s*\{([^{}]*)\}"
+)
+
+
+def _strip_choice_font_wrappers(text: str) -> str:
+    """Unwrap LaTeX font/emphasis commands to their content (idempotent per pass).
+
+    Applied repeatedly so a nested wrapper (``\\textbf{\\text{B}}``) fully collapses.
+    """
+    prev = None
+    while prev != text:
+        prev = text
+        text = _CHOICE_FONT_CMD_RE.sub(r"\1", text)
+    return text
+
+
 _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
@@ -702,6 +725,9 @@ def extract_choice_letter(text: str) -> str | None:
     """
     if not text:
         return None
+    # Unwrap LaTeX font/emphasis commands first, so a boxed but formatted letter
+    # (``\boxed{\text{B}}``, ``\textbf{C}``) is matched exactly like a bare one.
+    text = _strip_choice_font_wrappers(text)
     for pat in _CHOICE_PATTERNS:
         # Take the LAST match of each pattern: the model may discuss or revise a
         # choice before committing ("the answer is A ... on reflection, C"), so
