@@ -23,6 +23,9 @@ T = TypeVar("T")
 #: there (issue #35).
 #: GPQA-Diamond publishes only ``train``; both logical splits read it and are then
 #: carved into disjoint subsets by :func:`select_holdout` (issue #95).
+#: SWE-bench Verified publishes only ``test`` (500 instances); logical ``train``
+#: reads it and the two splits are carved into disjoint subsets, so training and
+#: evaluation never overlap.
 _SPLIT_ALIASES: dict[str, dict[str, str]] = {
     "mmlu": {
         "train": "auxiliary_train",
@@ -37,6 +40,10 @@ _SPLIT_ALIASES: dict[str, dict[str, str]] = {
         "training": "train",
         "test": "train",
     },
+    "swebench_verified": {
+        "train": "test",
+        "training": "test",
+    },
 }
 
 #: Seed for the deterministic holdout partition. Fixed: changing it silently
@@ -47,6 +54,7 @@ HOLDOUT_SEED: int = 20260710
 #: benchmarks that publish a single upstream split need an entry.
 _HOLDOUT_FRACTION: dict[str, float] = {
     "gpqa": 0.25,
+    "swebench_verified": 0.25,
 }
 
 #: Logical split names served the held-out rows; every other name gets the rest.
