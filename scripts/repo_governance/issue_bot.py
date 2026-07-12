@@ -23,6 +23,11 @@ _ENHANCEMENT_SECTION_HINTS: tuple[tuple[str, str], ...] = (
     (r"##\s*goal|^\*\*goal\*\*", "goal or motivation"),
 )
 
+#: Every section header, so one section's body never runs into the next header.
+_ALL_SECTION_PATTERNS: tuple[str, ...] = tuple(
+    pattern for pattern, _ in (*_BUG_SECTION_HINTS, *_ENHANCEMENT_SECTION_HINTS)
+)
+
 
 @dataclass(frozen=True)
 class IssueAnalysis:
@@ -34,15 +39,39 @@ class IssueAnalysis:
     comment: str | None = None
 
 
+def _section_body(lines: list[str], header_idx: int) -> str:
+    """Return the text between a section header and the next section header.
+
+    Excludes the header line itself and stops at the next recognised section
+    header, so a header's own words never count as its content and one empty
+    section is not judged "filled" by the following section's header line.
+
+    Args:
+        lines: The issue body split into lines.
+        header_idx: Index of the matched section-header line.
+
+    Returns:
+        The stripped body of the section (may be empty).
+    """
+    collected: list[str] = []
+    for line in lines[header_idx + 1:]:
+        if any(re.search(p, line, flags=re.IGNORECASE) for p in _ALL_SECTION_PATTERNS):
+            break
+        collected.append(line)
+    return "\n".join(collected).strip()
+
+
 def _has_section(body: str, pattern: str) -> bool:
     if not re.search(pattern, body, flags=re.IGNORECASE | re.MULTILINE):
         return False
-    # Require non-placeholder content on the same or following lines.
+    # Require non-placeholder content in the section's OWN body — the lines after
+    # its header and before the next section header. Measuring the header line (or
+    # the following section's headers) let an empty section pass as filled.
     lines = body.splitlines()
     for idx, line in enumerate(lines):
         if re.search(pattern, line, flags=re.IGNORECASE):
-            tail = "\n".join(lines[idx : idx + 6]).strip()
-            cleaned = re.sub(r"[#*_`\-\s]", "", tail).lower()
+            section = _section_body(lines, idx)
+            cleaned = re.sub(r"[#*_`\-\s]", "", section).lower()
             if len(cleaned) >= 12 and "tbd" not in cleaned and "todo" not in cleaned:
                 return True
     return False

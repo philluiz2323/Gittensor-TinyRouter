@@ -114,3 +114,40 @@ def test_pr_bot_detects_routing_submission_from_title_tag():
     )
     result = pr_bot.analyze_pr("[submission] miner-a gen 1 — math500", body, ["README.md"])
     assert result.is_routing_submission is True
+
+
+# --------------------------------------------------------------------------- #
+# issue_bot: an empty section must not pass triage on its header words
+# --------------------------------------------------------------------------- #
+def test_issue_bot_flags_all_empty_bug_sections():
+    # A [bug] issue with only the (empty) section headers must report every
+    # section as missing -- the header text must not count as content, and one
+    # empty section must not be "filled" by the next section's header.
+    body = "**Describe the bug**\n\n**Expected vs actual**\n\n**To reproduce**\n"
+    result = issue_bot.analyze_issue("[bug] crash", body)
+    for field_name in ("bug description", "expected vs actual behavior", "reproduction steps"):
+        assert field_name in result.missing_fields
+    assert result.comment is not None
+
+
+def test_issue_bot_accepts_a_filled_bug_report():
+    body = (
+        "**Describe the bug**\nThe scorer raises IndexError on empty input.\n\n"
+        "**Expected vs actual**\nExpected a score; it crashes instead.\n\n"
+        "**To reproduce**\nCall score_text with an empty candidate list.\n"
+    )
+    result = issue_bot.analyze_issue("[bug] crash", body)
+    assert result.missing_fields == []
+
+
+def test_issue_bot_empty_section_not_filled_by_next_header():
+    # Only the middle section is filled; the empty first/last must be flagged.
+    body = (
+        "**Describe the bug**\n\n"
+        "**Expected vs actual**\nExpected success, observed a hard crash instead.\n\n"
+        "**To reproduce**\n"
+    )
+    result = issue_bot.analyze_issue("[bug] x", body)
+    assert "bug description" in result.missing_fields
+    assert "reproduction steps" in result.missing_fields
+    assert "expected vs actual behavior" not in result.missing_fields
