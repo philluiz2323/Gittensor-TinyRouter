@@ -219,7 +219,8 @@ async def train(args) -> dict:
 
         fits = await evaluate_population(
             thetas, spec, policy, pool, pool_models, minibatch_fn,
-            sample=True, on_candidate=_on_cand, fitness_cfg=fitness_cfg, **run_kwargs
+            sample=True, on_candidate=_on_cand, fitness_cfg=fitness_cfg,
+            run_seed=args.seed, generation=gen, **run_kwargs
         )
         es.tell(thetas, fits)
 

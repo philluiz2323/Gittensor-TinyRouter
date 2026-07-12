@@ -142,12 +142,22 @@ def analyze_run(
 
     signal_drop = (max(signal) - signal[-1]) if signal else 0.0
     improved = net_gain > tol
+    # "Converged to a bad policy" is a collapse in the per-iteration objective J(θ)
+    # — the ``signal`` curve — NOT the best-so-far ``best`` curve, which is monotone
+    # non-decreasing by construction (sep_cmaes returns opt.best() each gen) and so
+    # can never fall. Judging degeneracy on ``best`` alone made the flag unable to
+    # fire and left ``signal_drop`` computed but unused. Flag a run degenerate when
+    # best-so-far never improved OR the population's objective ended below where it
+    # started (a genuine regression). Sign-only, so noisy per-gen fluctuation that
+    # still nets upward is not falsely flagged.
+    signal_regressed = bool(signal) and signal[-1] < signal[0] - tol
+    degenerate = (not improved) or signal_regressed
     return RunConvergence(
         run_id=rid, benchmark=benchmark, trainer=trainer, n_iters=n,
         initial=initial, final=final, peak=peak, net_gain=net_gain,
         improved=improved, best_monotone=best_monotone, iters_to_best=iters_to_best,
         trend_slope=trend_slope, tail_plateau=tail_plateau, signal_drop=signal_drop,
-        degenerate=not improved, overfit_gap=_overfit_gap(summary),
+        degenerate=degenerate, overfit_gap=_overfit_gap(summary),
     )
 
 
@@ -185,7 +195,12 @@ def analyze_runs(runs: Sequence[RunConvergence]) -> dict[str, Any]:
         "rankings": rankings,
         "observed_optimizer_order": observed_order,
         "r8_expected_order": list(R8_EXPECTED_ORDER),
-        "dod_drives_J_upward": bool(dod_runs) and all(r.improved for r in dod_runs),
+        # DoD is "drives J(θ) upward over iterations": require every sep-CMA-ES run
+        # to improve its best-so-far AND not end in a per-iteration collapse, so a
+        # run that got lucky early and then regressed does not satisfy the DoD.
+        "dod_drives_J_upward": bool(dod_runs) and all(
+            r.improved and not r.degenerate for r in dod_runs
+        ),
         "degenerate_runs": [r.run_id for r in runs if r.degenerate],
     }
 

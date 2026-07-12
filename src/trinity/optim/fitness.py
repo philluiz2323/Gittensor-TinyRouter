@@ -345,6 +345,9 @@ async def evaluate_candidate(
     return_per_task: bool = False,
     fitness_cfg: FitnessConfig | None = None,
     max_turns: int = 5,
+    run_seed: int | None = None,
+    generation: int = 0,
+    candidate_idx: int = 0,
     **run_kwargs,
 ) -> tuple:
     """Configure the policy with θ and score it over ``minibatch``.
@@ -381,14 +384,24 @@ async def evaluate_candidate(
         # return_exceptions=True so one trajectory that exhausts retries (e.g. a
         # persistent timeout) degrades to reward 0 instead of crashing the whole
         # training run. The optimizer treats it as a (slightly pessimistic) sample.
-        trajs = await asyncio.gather(
-            *[
-                run_trajectory(
-                    task, policy, pool, pool_models, sample=sample, client=client,
-                    max_turns=max_turns, **run_kwargs,
+        from trinity.optim.sampling import trajectory_sampling_rng
+
+        async def _run_one(task):
+            rng = None
+            if sample and run_seed is not None:
+                rng = trajectory_sampling_rng(
+                    run_seed=int(run_seed),
+                    generation=int(generation),
+                    candidate_idx=int(candidate_idx),
+                    task_id=str(getattr(task, "task_id", "") or ""),
                 )
-                for task in minibatch
-            ],
+            return await run_trajectory(
+                task, policy, pool, pool_models, sample=sample, rng=rng, client=client,
+                max_turns=max_turns, **run_kwargs,
+            )
+
+        trajs = await asyncio.gather(
+            *[_run_one(task) for task in minibatch],
             return_exceptions=True,
         )
     finally:
@@ -441,6 +454,8 @@ async def evaluate_population(
     on_candidate=None,
     fitness_cfg: FitnessConfig | None = None,
     max_turns: int = 5,
+    run_seed: int | None = None,
+    generation: int = 0,
     **run_kwargs,
 ) -> list[float]:
     """Evaluate λ candidates sequentially (GPU constraint). `minibatch_fn(i)->tasks`
@@ -482,6 +497,7 @@ async def evaluate_population(
                 theta, spec, policy, pool, pool_models, mb,
                 sample=sample, client=client,
                 return_per_task=True, fitness_cfg=cfg, max_turns=max_turns,
+                run_seed=run_seed, generation=generation, candidate_idx=i,
                 **run_kwargs,
             )
             fits.append(fit)

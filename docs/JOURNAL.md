@@ -37,6 +37,29 @@ warnings then follow. Added `tests/test_theta_inspect_nonfinite_moved.py` (pure 
 head/svf → not trained + warning, genuinely-moved block still trained, mixed finite/non-finite
 counts, fully-non-finite block → not trained. Fixes #229.
 **Follow-up:** none.
+## 2026-07-11 — Convergence DoD read the monotone best-so-far, so collapse was invisible  #mistake #decision
+
+**Context:** reading `analysis/convergence.py`, which checks the SPEC DoD "the optimizer drives
+J(θ) upward" and flags degenerate runs (issue #235).
+**Expected:** a run whose per-iteration objective J collapses is flagged degenerate and fails the
+DoD — that is the "sep-CMA-ES occasionally converged to a bad policy" case the module names.
+**Actual:** it passed both. `improved`/`degenerate`/`trend_slope` were all computed on the
+`best_fitness` (best-so-far) curve, which `sep_cmaes.run` writes as `opt.best()` each gen — monotone
+non-decreasing by construction (its own smoke test asserts this). So `net_gain >= 0`, `improved` is
+~always True, `degenerate = not improved` ~never fires, and `dod_drives_J_upward = all(improved)` is
+a tautology. The `signal_drop` metric that *does* measure per-iteration collapse was computed but
+wired into nothing.
+**Root cause:** two curves were extracted — `best` (monotone) and `signal` (per-gen J) — but every
+verdict read `best`, the one that cannot fall.
+**Fix / decision:** judge collapse on `signal`. `[OUR CHOICE]` a sign-only criterion
+(`signal[-1] < signal[0] - tol`) rather than a magnitude threshold, so a genuine end-below-start
+regression is flagged while noisy-but-net-upward J is not — no arbitrary cutoff to bikeshed.
+`degenerate = (not improved) or signal_regressed`, and the DoD now requires `improved and not
+degenerate` across the sep-CMA-ES runs. Verified: J collapsing 0.5→0.3 while best-so-far rises now
+flags degenerate and breaks the DoD; a 0.3→0.6→0.5 wobble does not.
+**Follow-up:** `observed_optimizer_order` still means-pools `final` across benchmarks of differing
+difficulty, so a trainer that ran only on an easy benchmark can outrank one that wins on every
+shared benchmark — a separate methodological fix.
 
 ## 2026-07-11 — dataset-quality audit missed a None prompt and mis-flagged it as a duplicate  #mistake #gotcha #repro
 

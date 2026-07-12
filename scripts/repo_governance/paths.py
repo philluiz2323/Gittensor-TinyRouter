@@ -55,7 +55,13 @@ class PathMatch:
 
 
 def _normalise_path(path: str) -> str:
-    return (path or "").replace("\\", "/").lstrip("./")
+    # Strip a leading "./" PREFIX only. ``str.lstrip("./")`` strips the leading
+    # "." and "/" *characters*, which mangles dot-directories: ".github/..." became
+    # "github/...", so a .github/ PR never matched the ".github/" area rule and
+    # never got the ``area:infra`` label. ``removeprefix`` strips the prefix, not
+    # characters, so ".github/..." is preserved while "./configs/..." still loses
+    # its "./".
+    return (path or "").replace("\\", "/").removeprefix("./")
 
 
 def is_sensitive_path(path: str) -> bool:

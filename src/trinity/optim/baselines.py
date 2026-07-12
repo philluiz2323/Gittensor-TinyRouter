@@ -352,6 +352,8 @@ class RandomSearchTrainer(BaseTrainer):
             on_candidate=_on_cand,
             fitness_cfg=fitness_cfg,
             max_turns=max_turns,
+            run_seed=self.seed,
+            generation=0,
             **run_kwargs,
         )
 

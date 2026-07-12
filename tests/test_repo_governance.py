@@ -117,6 +117,29 @@ def test_pr_bot_detects_routing_submission_from_title_tag():
 
 
 # --------------------------------------------------------------------------- #
+# paths: a .github/ change must be labelled area:infra (dot-dir normalization)
+# --------------------------------------------------------------------------- #
+def test_github_path_normalises_without_dropping_the_dot():
+    assert paths._normalise_path(".github/workflows/ci.yml") == ".github/workflows/ci.yml"
+
+
+def test_github_workflow_change_gets_area_infra():
+    assert "area:infra" in paths.area_labels_for_path(".github/workflows/ci.yml")
+    _sensitive, labels = paths.analyse_changed_paths([".github/workflows/ci.yml"])
+    assert "area:infra" in labels
+
+
+def test_leading_dot_slash_prefix_is_still_stripped():
+    # Regression: a "./"-prefixed path still normalises (and stays sensitive).
+    assert paths._normalise_path("./configs/trinity.yaml") == "configs/trinity.yaml"
+    assert paths.is_sensitive_path("./configs/trinity.yaml") is True
+
+
+def test_plain_paths_are_unchanged():
+    assert paths._normalise_path("src/trinity/adapters/x.py") == "src/trinity/adapters/x.py"
+    assert paths.area_labels_for_path("src/trinity/adapters/x.py") == ("area:adapters",)
+
+
 # Routing template: fields are filled INLINE (the shipped template's layout)
 # --------------------------------------------------------------------------- #
 def _inline_routing_body(cost: str = "$25.00") -> str:
