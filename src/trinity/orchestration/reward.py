@@ -473,8 +473,9 @@ def normalize_math_answer(ans: str | None) -> str:
     ``=``, surrounding ``\{...\}``, and outer whitespace. Collapses internal
     whitespace and lowercases. Converts ``a/b`` integer fractions and
     ``\frac{a}{b}`` to a canonical ``Fraction`` string when possible, and folds
-    the constant pi (``\pi``, the Unicode ``π``, and a plain ``pi``) to one
-    canonical ``pi`` token.
+    ``\sqrt{x}``/``\sqrt x`` to a canonical ``sqrt(x)`` token and the constant
+    pi (``\pi``, the Unicode ``π``, and a plain ``pi``) to one canonical ``pi``
+    token.
 
     Args:
         ans: Raw answer text (or ``None``).
@@ -519,6 +520,15 @@ def normalize_math_answer(ans: str | None) -> str:
     # must normalize identically (else \tfrac{3}{4} is a false negative vs \dfrac).
     s = re.sub(r"\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
     s = re.sub(r"\\[dt]?frac\s*(\d)\s*(\d)", r"\1/\2", s)
+    # \sqrt{x} -> sqrt(x), and the unbraced single-token \sqrt2 -> sqrt(2). Like the
+    # \frac handling just above, the braced and bare forms render the SAME value, so
+    # they must normalize identically (else \sqrt{2} is a false negative against a
+    # reference written \sqrt2). Folding to sympy's ``sqrt(...)`` spelling also lets
+    # the symbolic fallback bridge value-equal forms like 2\sqrt{3} vs 2sqrt(3); the
+    # bare backslash of ``\sqrt`` otherwise makes parse_expr raise. Runs after \frac
+    # so a fraction nested inside the radicand is already unwrapped.
+    s = re.sub(r"\\sqrt\s*\{([^{}]*)\}", r"sqrt(\1)", s)
+    s = re.sub(r"\\sqrt\s*([0-9a-zA-Z])", r"sqrt(\1)", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
     # Canonicalize the constant pi to a bare ``pi`` token. Models and datasets
     # write the same value three ways — the LaTeX ``\pi`` command, the Unicode
@@ -531,6 +541,11 @@ def normalize_math_answer(ans: str | None) -> str:
     # (the product symbol) is intentionally left untouched.
     s = re.sub(r"\\pi(?![a-zA-Z])", "pi", s)
     s = s.replace("π", "pi")
+    # The fraction normalizer wraps arbitrary operands, so ``\frac{\pi}{2}``
+    # becomes ``(pi)/(2)`` while ``\pi/2`` becomes ``pi/2``. Remove only
+    # standalone atomic operands adjacent to division; this keeps function-call
+    # parentheses such as ``sqrt(2)`` intact without requiring optional sympy.
+    s = re.sub(r"(^|/)\((pi|\d+)\)(?=/|$)", r"\1\2", s)
     s = re.sub(r"\s+", "", s)
     # LaTeX digit grouping "1{,}000" -> "1,000" so the comma-strip below removes it
     # (a boxed answer like \boxed{2{,}048} otherwise never matches "2048").

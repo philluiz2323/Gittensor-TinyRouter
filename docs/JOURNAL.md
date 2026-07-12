@@ -18,6 +18,32 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — Radical canonicalization changed a font-wrapper regression expectation  #mistake #repro
+
+**Context:** running the full CI suite after combining the font-wrapper and sqrt-normalization
+fixes.
+**Expected:** `\mathbf{\sqrt{2}}` follows the same canonical radical spelling as `\sqrt{2}`.
+**Actual:** the inherited font-wrapper test expected the pre-sqrt-normalization text
+`\sqrt{2}`, while normalization now correctly returns `sqrt(2)`.
+**Root cause:** the font-wrapper test asserted an intermediate representation that the later
+radical canonicalizer intentionally changes.
+**Fix / decision:** update the expected canonical form to `sqrt(2)` while retaining the end-to-end
+scoring assertion. This aligns the cross-feature regression test with the normalizer contract.
+**Follow-up:** none.
+
+## 2026-07-12 — Pi fractions depended on optional SymPy for equivalent normalization  #mistake #decision #repro
+
+**Context:** resolving the sqrt-normalization PR after the pi-normalization PR merged.
+**Expected:** `\frac{\pi}{2}` and `\pi/2` grade equally even when SymPy is unavailable.
+**Actual:** the fraction rule produced `(pi)/(2)` while the slash form produced `pi/2`; exact
+comparison failed and the guarded symbolic fallback returns false on installations without SymPy.
+**Root cause:** the generic fraction normalizer preserves grouping parentheses, but the equivalent
+plain slash spelling has none.
+**Fix / decision:** remove parentheses only around atomic `pi` or integer operands adjacent to a
+division operator. This canonicalizes those equivalent forms while preserving function calls such
+as `sqrt(2)`. The existing pi-fraction regression test now passes without SymPy.
+**Follow-up:** none.
+
 ## 2026-07-11 — theta_inspect counted a NaN as a "moved" (trained) parameter  #mistake #gotcha #repro
 
 **Context:** reading the new `trinity.theta_inspect` (diagnoses whether a submission theta actually

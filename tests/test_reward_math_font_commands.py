@@ -49,7 +49,7 @@ def test_frac_is_not_treated_as_a_font_command():
 
 def test_font_commands_unwrap_braced_payloads():
     assert normalize_math_answer(r"\mathbf{\frac{1}{2}}") == "1/2"
-    assert normalize_math_answer(r"\mathbf{\sqrt{2}}") == r"\sqrt{2}"
+    assert normalize_math_answer(r"\mathbf{\sqrt{2}}") == "sqrt(2)"
     assert normalize_math_answer(r"\mathbf{\mathrm{5}}") == "5"
 
 
