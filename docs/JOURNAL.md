@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-11 — dataset-quality audit missed a None prompt and mis-flagged it as a duplicate  #mistake #gotcha #repro
+
+**Context:** reading the new `trinity.dataset_quality.audit_dataset` (the offline data-quality audit
+of a built benchmark, #189).
+**Expected:** an item with no usable prompt is counted as `missing_prompt` — the audit exists to
+catch "an unscoreable item that still counts toward the denominator".
+**Actual:** the prompt was read as `it.get("question_text", "")`, whose `""` default only applies
+when the key is ABSENT. A present `question_text: None` returned `None`, and `str(None)` is the
+truthy `"None"`: so `missing_prompt` stayed 0, and two None items both normalized to `"none"` and
+were reported as a `duplicate_questions`. Reproduced offline: two `{"question_text": None}` items ->
+`missing_prompt=0, duplicate_questions=1` (should be `2, 0`).
+**Root cause:** `dict.get(k, default)` returns a stored `None` rather than the default. The sibling
+`correct_answer` check on the same loop already guards `if ref is None or ...`, so the prompt path
+was inconsistent with the answer path.
+**Fix / decision:** read the prompt as `it.get("question_text") or ""` in all three spots, so `None`
+is treated as blank exactly like `""` and like the answer path. Added
+`tests/test_dataset_quality_none_prompt.py`. Fixes #225.
+**Follow-up:** none.
+
 ## 2026-07-11 — verify_benchmark crashed on the missing-manifest case it exists to report  #mistake #gotcha #repro
 
 **Context:** reading the new `scripts/verify_benchmark.py` CLI (the offline hidden-benchmark

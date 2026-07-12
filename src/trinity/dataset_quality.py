@@ -136,15 +136,19 @@ def audit_dataset(items: Iterable[Mapping[str, Any]]) -> DatasetQualityReport:
         id_counts = Counter(str(it.get("question_id", "")) for it in group)
         q.duplicate_ids = sorted(i for i, c in id_counts.items() if c > 1)
 
+        # ``or ""`` (not the get-default) so a present ``question_text: None`` is
+        # treated as blank, like the ``correct_answer`` path below — otherwise
+        # ``str(None)`` is the truthy ``"None"``, which hides the missing prompt and
+        # collides two None items into a spurious duplicate.
         text_counts = Counter(
-            normalize_question(it.get("question_text", "")) for it in group
-            if str(it.get("question_text", "")).strip()
+            normalize_question(it.get("question_text") or "") for it in group
+            if str(it.get("question_text") or "").strip()
         )
         # Count the EXTRA copies (a question appearing 3x contributes 2 duplicates).
         q.duplicate_questions = sum(c - 1 for c in text_counts.values() if c > 1)
 
         for it in group:
-            if not str(it.get("question_text", "")).strip():
+            if not str(it.get("question_text") or "").strip():
                 q.missing_prompt += 1
             ref = it.get("correct_answer")
             if ref is None or (isinstance(ref, str) and not ref.strip()):
