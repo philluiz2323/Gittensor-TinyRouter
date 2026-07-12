@@ -87,6 +87,52 @@ def test_self_same_gen_is_skipped(tmp_path):
     assert pr_eval._check_duplicate(head, svf, tmp_path, "alice", 1) is None
 
 
+def _write_submission_named(root: Path, miner: str, gen_dirname: str,
+                            head: np.ndarray, svf: np.ndarray) -> None:
+    """Like ``_write_submission`` but with an explicit (possibly non-canonical) dir name."""
+    d = root / miner / gen_dirname
+    d.mkdir(parents=True, exist_ok=True)
+    np.save(d / "head_weights.npy", head.astype(np.float32))
+    np.save(d / "svf_scales.npy", svf.astype(np.float32))
+
+
+def test_self_skip_is_integer_based_not_string_based(tmp_path):
+    """A non-canonical generation dir (e.g. ``07``) is still the submission's own.
+
+    ``pr_eval`` parses the generation with ``int(parts[1])``, so it accepts
+    ``submissions/alice/07`` as generation 7. The self-skip must recognise that
+    directory as self and NOT flag the head as a copy of itself.
+    """
+    head, svf = _rand_head(1), _near_identity_svf(10)
+    _write_submission_named(tmp_path, "alice", "07", head, svf)
+    assert pr_eval._check_duplicate(head, svf, tmp_path, "alice", 7) is None
+    # padding on both sides, and a wider pad, are also self.
+    assert pr_eval._check_duplicate(head, svf, tmp_path, "alice", 7) is None
+    _write_submission_named(tmp_path, "alice", "007", head, svf)
+    assert pr_eval._check_duplicate(head, svf, tmp_path, "alice", 7) is None
+
+
+def test_copy_of_a_different_generation_is_still_caught_with_padded_dirs(tmp_path):
+    """The integer-aware skip must not become a blanket skip: a *different* miner's
+    padded-dir head that matches is still a duplicate."""
+    head = _rand_head(1)
+    _write_submission_named(tmp_path, "alice", "07", head, _near_identity_svf(10))
+    err = pr_eval._check_duplicate(head, _near_identity_svf(999, std=0.05),
+                                   tmp_path, "bob", 1)
+    assert err is not None and "duplicate_of_alice" in err
+
+
+def test_same_generation_helper_is_integer_aware():
+    from trinity.submission.gates import _same_generation
+    assert _same_generation("07", 7) is True
+    assert _same_generation("7", 7) is True
+    assert _same_generation("007", 7) is True
+    assert _same_generation("8", 7) is False
+    # genuinely non-numeric names fall back to string equality (no crash)
+    assert _same_generation("final", "final") is True
+    assert _same_generation("final", 7) is False
+
+
 def test_mismatched_head_shape_is_skipped(tmp_path):
     """A prior submission with a different head geometry is not comparable."""
     _write_submission(tmp_path, "alice", 1, _rand_head(1), _near_identity_svf(10))
