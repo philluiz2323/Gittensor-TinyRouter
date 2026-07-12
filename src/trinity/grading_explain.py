@@ -124,10 +124,20 @@ def explain_grade(benchmark: str, candidate: str, reference: object) -> GradeExp
     """
     from trinity.orchestration import reward as R
 
-    key = (benchmark or "").strip().lower()
+    # Route on the resolved dispatch key, exactly as ``score_text`` and
+    # ``has_answer`` do — otherwise a versioned/adapter identity like
+    # ``livecodebench_v6`` (see ``reward._BENCHMARK_ALIASES``) falls through to the
+    # "unknown benchmark" branch here while ``score_text`` still grades it, so the
+    # explanation would report ``kind="unknown"`` / "no grading pipeline" for an
+    # answer that actually scored 1.0. That contradiction breaks this module's one
+    # promise: the trace can never disagree with the real grade.
+    key = R.resolve_benchmark(benchmark)
     ref_str = reference if isinstance(reference, str) else str(reference)
     steps: list[str] = []
     detail: dict[str, Any] = {}
+    raw_key = (benchmark or "").strip().lower()
+    if key != raw_key:
+        steps.append(f"benchmark {benchmark!r} resolves to dispatch key {key!r}")
 
     if key in R.MATH_BENCHMARKS:
         kind = "math"

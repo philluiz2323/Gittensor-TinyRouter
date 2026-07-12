@@ -147,6 +147,58 @@ def test_routing_invariant_head_collapses_the_shift():
     assert other < pr_eval._COPY_THRESHOLD
 
 
+def _scale_head_per_group(head: np.ndarray, agent_alpha: float, role_alpha: float) -> np.ndarray:
+    """Copy a head, then multiply each logit group's rows by a positive scalar.
+
+    LinearHead argmax over each group is invariant to a positive per-group scale,
+    so this reproduces a rival's routing EXACTLY while changing the raw weights
+    (issue #256).
+    """
+    n_models = pr_eval._N_HEAD_MODELS
+    out = head.copy()
+    out[:n_models] *= agent_alpha
+    out[n_models:] *= role_alpha
+    return out
+
+
+def test_routing_preserving_scale_is_caught(tmp_path):
+    """The #256 evasion: copy a head, scale each logit group by a positive factor."""
+    head = _rand_head(1)
+    _write_submission(tmp_path, "alice", 1, head, _near_identity_svf(10))
+
+    attack = _scale_head_per_group(head, agent_alpha=2.0, role_alpha=0.5)
+    # Sanity: raw cosine is 1.0 (scale-invariant), but the OLD centered-only view
+    # dropped below threshold; the scale-invariant gate must still reject it.
+    err = pr_eval._check_duplicate(attack, _near_identity_svf(999, std=0.05),
+                                   tmp_path, "bob", 1)
+    assert err is not None and err.startswith("duplicate_of_alice_gen_1")
+
+
+def test_routing_invariant_head_collapses_scale_and_shift(tmp_path):
+    """The view is invariant to per-group scale, and to a scale+shift combo."""
+    head = _rand_head(2)
+    scaled = _scale_head_per_group(head, agent_alpha=3.0, role_alpha=0.2)
+    combo = _scale_head_per_group(_shift_head_per_group(head, seed=5), agent_alpha=4.0, role_alpha=2.0)
+    for attack in (scaled, combo):
+        sim = pr_eval._cosine_similarity(
+            pr_eval._routing_invariant_head(head),
+            pr_eval._routing_invariant_head(attack),
+        )
+        assert sim == pytest.approx(1.0, abs=1e-9)
+    # A scaled copy is flagged end-to-end through the gate.
+    _write_submission(tmp_path, "alice", 1, head, _near_identity_svf(10))
+    err = pr_eval._check_duplicate(scaled, _near_identity_svf(1), tmp_path, "bob", 1)
+    assert err is not None and err.startswith("duplicate_of_alice_gen_1")
+
+
+def test_degenerate_zero_norm_group_does_not_crash():
+    """A head whose agent rows are all equal (zero-norm centered group) is finite."""
+    head = _rand_head(1)
+    head[: pr_eval._N_HEAD_MODELS] = head[0]   # identical agent rows -> centered group is 0
+    inv = pr_eval._routing_invariant_head(head)
+    assert inv is not None and np.all(np.isfinite(inv))
+
+
 def test_king_copy_is_caught(tmp_path, monkeypatch):
     """A head copied from the leaderboard king is rejected even with new SVF.
 

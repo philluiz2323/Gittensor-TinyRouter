@@ -99,6 +99,7 @@ class CacheStats:
     writes: int = 0
     bypassed: int = 0          # sampled requests, never cacheable
     errors: int = 0            # unreadable/corrupt entries, treated as misses
+    skipped: int = 0           # transient empty/error completions, never persisted
     prompt_tokens_saved: int = 0
     completion_tokens_saved: int = 0
 
@@ -125,6 +126,7 @@ class CacheStats:
             "writes": self.writes,
             "bypassed": self.bypassed,
             "errors": self.errors,
+            "skipped": self.skipped,
             "hit_rate": round(self.hit_rate, 4),
             "prompt_tokens_saved": self.prompt_tokens_saved,
             "completion_tokens_saved": self.completion_tokens_saved,
@@ -224,6 +226,23 @@ def _is_cacheable(temperature: float) -> bool:
     return float(temperature) == 0.0
 
 
+def _is_cacheable_result(result: Any) -> bool:
+    """True iff a completion is a real answer worth persisting.
+
+    A transient empty/error response — ``finish_reason == "error"`` or blank
+    ``text``, which is what :class:`~trinity.llm.openrouter_client.OpenRouterPool`
+    returns for a moderation block, an upstream-error-surfaced-as-200, or a
+    non-JSON CDN body — must never be cached. Persisting it would re-serve the
+    empty text for every future identical request, turning a one-off transient
+    failure into a permanent 0 score for that item (and reporting bogus
+    ``tokens_saved``). Skipping the write only ever costs a recomputation; it can
+    never return a wrong cached answer.
+    """
+    if getattr(result, "finish_reason", None) == "error":
+        return False
+    return bool(str(getattr(result, "text", "") or "").strip())
+
+
 class CachedPool:
     """Wrap a pool so deterministic completions are served from disk.
 
@@ -300,7 +319,13 @@ class CachedPool:
             model, messages, temperature=temperature, top_p=top_p,
             max_tokens=max_tokens, reasoning=reasoning, **kwargs,
         )
-        self._cache.put(key, self._record_from(result))
+        # Never persist a transient empty/error completion: it would be re-served
+        # for every future identical request, freezing a one-off failure into a
+        # permanent wrong (0) score. Skipping only forces a fresh call next time.
+        if _is_cacheable_result(result):
+            self._cache.put(key, self._record_from(result))
+        else:
+            self._cache.stats.skipped += 1
         return result
 
     @staticmethod

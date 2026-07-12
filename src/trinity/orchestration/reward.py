@@ -414,6 +414,56 @@ def extract_last_number(text: str) -> str | None:
     return matches[-1].replace(",", "").replace(" ", "")
 
 
+_FONT_COMMANDS = ("text", "mathrm", "mathbf", "mathit", "mathsf", "mathtt", "boldsymbol")
+
+
+def _unwrap_font_commands(s: str) -> str:
+    """Peel LaTeX font/style wrappers using balanced-brace scanning.
+
+    Font commands change only presentation, not value. Unlike the old single-level
+    ``[^{}]*`` regex, this handles braced payloads such as ``\\mathbf{\\frac{1}{2}}``.
+    Unbalanced wrappers are left untouched.
+    """
+    changed = True
+    while changed:
+        changed = False
+        for cmd in _FONT_COMMANDS:
+            marker = f"\\{cmd}"
+            idx = 0
+            while True:
+                pos = s.find(marker, idx)
+                if pos == -1:
+                    break
+                brace = pos + len(marker)
+                while brace < len(s) and s[brace] in " \t":
+                    brace += 1
+                if brace >= len(s) or s[brace] != "{":
+                    idx = pos + len(marker)
+                    continue
+                depth = 0
+                start = brace + 1
+                i = brace
+                end = -1
+                while i < len(s):
+                    ch = s[i]
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i
+                            break
+                    i += 1
+                if end == -1:
+                    idx = pos + len(marker)
+                    continue
+                inner = s[start:end]
+                s = s[:pos] + inner + s[end + 1 :]
+                changed = True
+                idx = pos + len(inner)
+    return s
+
+
 def normalize_math_answer(ans: str | None) -> str:
     r"""Normalize a math answer string for robust comparison.
 
@@ -422,7 +472,9 @@ def normalize_math_answer(ans: str | None) -> str:
     ``\text{...}``, ``\%`` and trailing ``%``, ``^\circ``/``\degree``, a leading
     ``=``, surrounding ``\{...\}``, and outer whitespace. Collapses internal
     whitespace and lowercases. Converts ``a/b`` integer fractions and
-    ``\frac{a}{b}`` to a canonical ``Fraction`` string when possible.
+    ``\frac{a}{b}`` to a canonical ``Fraction`` string when possible, and folds
+    the constant pi (``\pi``, the Unicode ``π``, and a plain ``pi``) to one
+    canonical ``pi`` token.
 
     Args:
         ans: Raw answer text (or ``None``).
@@ -445,11 +497,7 @@ def normalize_math_answer(ans: str | None) -> str:
     # answer looks, not its value, so \mathbf{5} must normalize to 5 exactly as
     # \text{5}/\mathrm{5} already do (otherwise a bold-formatted answer is a false
     # negative against a plain reference).
-    s = re.sub(
-        r"\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol)\s*\{([^{}]*)\}",
-        r"\1",
-        s,
-    )
+    s = _unwrap_font_commands(s)
     s = s.replace(r"\%", "").replace("%", "")
     # Degree symbol in either brace form: ``^\circ`` and ``^{\circ}``. The braced
     # form is common LaTeX and was previously left intact, so ``90^{\circ}`` never
@@ -472,6 +520,17 @@ def normalize_math_answer(ans: str | None) -> str:
     s = re.sub(r"\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
     s = re.sub(r"\\[dt]?frac\s*(\d)\s*(\d)", r"\1/\2", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
+    # Canonicalize the constant pi to a bare ``pi`` token. Models and datasets
+    # write the same value three ways — the LaTeX ``\pi`` command, the Unicode
+    # glyph ``π`` (U+03C0), and a plain ``pi`` — so ``2\pi``, ``2π`` and ``2 pi``
+    # must all normalize identically (else a correct pi-valued answer is a false
+    # negative against a differently-spelled reference). ``pi`` is also the name
+    # sympy binds to the constant, so the symbolic fallback can then prove e.g.
+    # ``pi/2`` equal to ``\frac{\pi}{2}``. The negative lookahead keeps ``\pi`` a
+    # whole command (never a prefix of a longer ``\pi...`` macro); capital ``\Pi``
+    # (the product symbol) is intentionally left untouched.
+    s = re.sub(r"\\pi(?![a-zA-Z])", "pi", s)
+    s = s.replace("π", "pi")
     s = re.sub(r"\s+", "", s)
     # LaTeX digit grouping "1{,}000" -> "1,000" so the comma-strip below removes it
     # (a boxed answer like \boxed{2{,}048} otherwise never matches "2048").
@@ -614,6 +673,29 @@ def _ref_to_str(reference: object) -> str:
 # Multiple choice: MMLU / GPQA
 # ---------------------------------------------------------------------------
 # Match in priority order. Earlier patterns are more explicit / trustworthy.
+# LaTeX font/emphasis wrappers a model may put around the answer letter. Unwrapping
+# them before matching lets a boxed, formatted choice (``\boxed{\text{B}}``,
+# ``\boxed{\textbf{D}}``, ``\mathbf{C}``) be read exactly as a bare ``B``/``D``/``C``
+# — the same commands ``normalize_math_answer`` already strips on the math path
+# (issue #12 widened choices to A-J but the extractor never saw the wrapped letter).
+_CHOICE_FONT_CMD_RE = re.compile(
+    r"\\(?:text|textbf|textit|textrm|emph|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol)"
+    r"\s*\{([^{}]*)\}"
+)
+
+
+def _strip_choice_font_wrappers(text: str) -> str:
+    """Unwrap LaTeX font/emphasis commands to their content (idempotent per pass).
+
+    Applied repeatedly so a nested wrapper (``\\textbf{\\text{B}}``) fully collapses.
+    """
+    prev = None
+    while prev != text:
+        prev = text
+        text = _CHOICE_FONT_CMD_RE.sub(r"\1", text)
+    return text
+
+
 _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
@@ -643,6 +725,9 @@ def extract_choice_letter(text: str) -> str | None:
     """
     if not text:
         return None
+    # Unwrap LaTeX font/emphasis commands first, so a boxed but formatted letter
+    # (``\boxed{\text{B}}``, ``\textbf{C}``) is matched exactly like a bare one.
+    text = _strip_choice_font_wrappers(text)
     for pat in _CHOICE_PATTERNS:
         # Take the LAST match of each pattern: the model may discuss or revise a
         # choice before committing ("the answer is A ... on reflection, C"), so

@@ -176,34 +176,39 @@ def routing_invariant_head(head_W: np.ndarray) -> Optional[np.ndarray]:
 
     ``LinearHead`` routes by argmax/softmax over two INDEPENDENT logit groups of
     ``z = W·h``: agent rows ``[0:N_HEAD_MODELS)`` and role rows
-    ``[N_HEAD_MODELS:]``. Adding a common vector ``c`` to every row of a group
-    shifts that group's logits by the same scalar ``c·h`` for every input, so
-    both ``argmax`` and ``softmax`` are unchanged — the head routes identically.
-    Raw-weight cosine, however, is NOT invariant to that shift, so a plagiarised
-    head can be given an arbitrary per-group offset to drive the cosine far below
-    the gate threshold while behaving identically (issue #152).
+    ``[N_HEAD_MODELS:]``. Two per-group transforms leave the routed ``argmax``
+    unchanged for every input, so a plagiarised head can use either to drive the
+    raw-weight cosine below the gate threshold while behaving identically:
 
-    Mean-centering each group's rows (subtracting the per-column mean across the
-    group) removes exactly that common-vector component, so an exact copy and any
-    of its shifted variants collapse to the same representation (cosine ``1.0``),
-    while genuinely different heads stay distinct.
+    * an **additive** per-group shift (add a common vector ``c`` to every row of a
+      group -> every logit shifts by the scalar ``c·h``), fixed in #152; and
+    * a **positive per-group scaling** (multiply a group's rows by ``α > 0`` ->
+      every logit scales by ``α``), issue #256.
+
+    To be a faithful routing fingerprint the view must be invariant to BOTH. For
+    each group: mean-center its rows (removes the additive shift), then L2-normalize
+    (removes the positive scale). An exact copy and any of its shifted and/or
+    rescaled variants collapse to the same representation (cosine ``1.0``), while
+    genuinely different heads stay distinct.
 
     Args:
         head_W: A head weight matrix, expected shape ``(n_a, d_h)`` with
             ``n_a > N_HEAD_MODELS``.
 
     Returns:
-        The centered head flattened to 1-D, or ``None`` when ``head_W`` is not a
-        2-D head with more than ``N_HEAD_MODELS`` rows (not comparable).
+        The centered + per-group-normalized head flattened to 1-D, or ``None`` when
+        ``head_W`` is not a 2-D head with more than ``N_HEAD_MODELS`` rows.
     """
     W = np.asarray(head_W, dtype=np.float64)
     if W.ndim != 2 or W.shape[0] <= N_HEAD_MODELS:
         return None
-    centered = W.copy()
-    agent, role = centered[:N_HEAD_MODELS], centered[N_HEAD_MODELS:]
-    agent -= agent.mean(axis=0, keepdims=True)
-    role -= role.mean(axis=0, keepdims=True)
-    return centered.ravel()
+    out = W.copy()
+    for group in (out[:N_HEAD_MODELS], out[N_HEAD_MODELS:]):
+        group -= group.mean(axis=0, keepdims=True)   # kill the additive per-group shift (#152)
+        norm = float(np.linalg.norm(group))
+        if norm > 0.0:
+            group /= norm                            # kill the positive per-group scale (#256)
+    return out.ravel()
 
 
 def check_duplicate(

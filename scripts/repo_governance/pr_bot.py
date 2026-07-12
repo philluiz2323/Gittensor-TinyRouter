@@ -74,17 +74,59 @@ def _general_section_filled(body: str) -> bool:
     return len(re.sub(r"[#*_`\-\s]", "", content)) >= 8
 
 
+#: The routing-submission fields a miner must fill (as ``**Label:**`` regexes).
+_ROUTING_FIELDS: tuple[str, ...] = (
+    r"\*\*benchmark:\*\*",
+    r"\*\*miner name:\*\*",
+    r"\*\*generation:\*\*",
+    r"\*\*training method:\*\*",
+    r"\*\*training cost:\*\*",
+)
+
+
+def _field_value(body: str, label_re: str) -> str | None:
+    """Return the value a submitter supplied for a ``**Label:**`` field.
+
+    The value may sit **inline** on the label line — which is exactly how
+    ``.github/PULL_REQUEST_TEMPLATE.md`` lays the routing fields out
+    (``**Benchmark:** math500``) — or on the next non-blank line. An empty field
+    returns ``None``, and the search never bleeds into the following ``**...**``
+    label, so a blank field is not mistaken as filled by the next label.
+
+    Args:
+        body: The full PR description.
+        label_re: A case-insensitive regex matching the ``**Label:**`` marker.
+
+    Returns:
+        The stripped value, or ``None`` when the label is absent or the field is
+        blank.
+    """
+    m = re.search(label_re, body, flags=re.IGNORECASE)
+    if not m:
+        return None
+    rest = body[m.end():]
+    newline = rest.find("\n")
+    inline = (rest if newline == -1 else rest[:newline]).strip()
+    if inline:
+        return inline
+    for line in rest.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # The next bold label means this field was left empty.
+        return None if re.match(r"\*\*.+?\*\*", stripped) else stripped
+    return None
+
+
 def _routing_section_filled(body: str) -> bool:
-    required = (
-        r"\*\*benchmark:\*\*",
-        r"\*\*miner name:\*\*",
-        r"\*\*generation:\*\*",
-        r"\*\*training method:\*\*",
-        r"\*\*training cost:\*\*",
-    )
-    for pattern in required:
-        m = re.search(pattern + r"\s*\n+(.+)", body, flags=re.IGNORECASE)
-        if not m or _contains_placeholder(m.group(1)):
+    """True iff every routing field carries a real (non-placeholder) value.
+
+    Values may be inline (the shipped template's layout) or on the following
+    line; a blank field or a leftover template placeholder counts as unfilled.
+    """
+    for label_re in _ROUTING_FIELDS:
+        value = _field_value(body, label_re)
+        if value is None or _contains_placeholder(value):
             return False
     return True
 

@@ -26,11 +26,23 @@ from trinity.analysis.convergence import (
     analyze_runs,
     render,
 )
+from trinity.analysis.ensemble import (
+    EnsembleSummary,
+    answers_agree,
+    plurality_answer,
+)
+from trinity.analysis.ensemble import analyze as analyze_ensemble
 from trinity.analysis.generalization import (
     GeneralizationGap,
     analyze_pair,
     overfit_verdict,
 )
+from trinity.analysis.sampling import (
+    ModelSampling,
+    SamplingSummary,
+    solve_counts,
+)
+from trinity.analysis.sampling import analyze as analyze_sampling
 from trinity.analysis.significance import (
     InvariantSignificance,
     PairedComparison,
@@ -38,6 +50,13 @@ from trinity.analysis.significance import (
     mcnemar,
     paired_bootstrap_ci,
     paired_diff_test,
+)
+from trinity.analysis.union_oracle import (
+    BenchmarkOracle,
+    UnionOracleSummary,
+    oracle_from_matrix,
+    relative_error_reduction,
+    union_oracle,
 )
 
 __all__ = [
@@ -56,13 +75,26 @@ __all__ = [
     "analyze_run",
     "analyze_runs",
     "render",
+    "EnsembleSummary",
+    "answers_agree",
+    "plurality_answer",
+    "analyze_ensemble",
     "GeneralizationGap",
     "analyze_pair",
     "overfit_verdict",
+    "ModelSampling",
+    "SamplingSummary",
+    "solve_counts",
+    "analyze_sampling",
     "InvariantSignificance",
     "PairedComparison",
     "assess_invariants",
     "paired_bootstrap_ci",
     "paired_diff_test",
     "mcnemar",
+    "BenchmarkOracle",
+    "UnionOracleSummary",
+    "oracle_from_matrix",
+    "relative_error_reduction",
+    "union_oracle",
 ]

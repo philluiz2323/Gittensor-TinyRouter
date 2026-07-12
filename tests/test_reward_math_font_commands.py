@@ -45,3 +45,18 @@ def test_bold_matches_plain_reference_and_vice_versa():
 def test_frac_is_not_treated_as_a_font_command():
     # \frac must be handled by the fraction rule, not swallowed by the unwrap.
     assert normalize_math_answer(r"\frac{1}{2}") == "1/2"
+
+
+def test_font_commands_unwrap_braced_payloads():
+    assert normalize_math_answer(r"\mathbf{\frac{1}{2}}") == "1/2"
+    assert normalize_math_answer(r"\mathbf{\sqrt{2}}") == r"\sqrt{2}"
+    assert normalize_math_answer(r"\mathbf{\mathrm{5}}") == "5"
+
+
+def test_bold_fraction_scores_correct():
+    assert score_text("math500", r"\boxed{\mathbf{\frac{1}{2}}}", "1/2") == 1.0
+    assert score_text("math500", r"\boxed{\mathbf{\sqrt{2}}}", r"\sqrt{2}") == 1.0
+
+
+def test_unbalanced_font_wrapper_left_intact():
+    assert normalize_math_answer(r"\mathbf{5") == r"\mathbf{5"

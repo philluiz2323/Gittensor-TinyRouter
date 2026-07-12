@@ -37,6 +37,8 @@ from trinity.fugu.workflow import (
     propose_and_run,
     run_workflow,
 )
+from trinity.fugu.cost_audit import FuguCostSummary, WorkerUtilization
+from trinity.fugu.cost_audit import analyze as analyze_cost
 from trinity.fugu.reward import committed_answer, is_correct, training_reward
 
 __all__ = [
@@ -51,4 +53,7 @@ __all__ = [
     "training_reward",
     "is_correct",
     "committed_answer",
+    "FuguCostSummary",
+    "WorkerUtilization",
+    "analyze_cost",
 ]

@@ -94,6 +94,25 @@ def test_unknown_benchmark_is_handled_not_raised():
     assert "unknown benchmark" in _joined(exp)
 
 
+def test_versioned_benchmark_identity_routes_like_the_grader():
+    # A frozen hidden LiveCodeBench v6 item carries the adapter *identity*
+    # "livecodebench_v6", which reward.resolve_benchmark maps to "livecodebench".
+    # The explainer must route on that resolved key so its kind/steps agree with
+    # the score (previously it labeled this "unknown" while score_text graded it,
+    # so the trace contradicted the grade).
+    spec = {"tests": [{"stdin": "", "expected_stdout": "hi\n"}], "timeout_s": 5}
+    code = "```python\nprint(\"hi\")\n```"
+    exp = explain_grade("livecodebench_v6", code, spec)
+    assert exp.kind == "code"
+    assert exp.detail["has_code"] is True
+    assert exp.score == R.score_text("livecodebench_v6", code, spec)
+    assert exp.correct == (exp.score > 0.0)
+    # The alias resolution is surfaced in the trace, not silently applied.
+    assert "resolves to dispatch key" in _joined(exp)
+    # And the contract holds: a graded (kind != unknown) item is never called unknown.
+    assert "unknown benchmark" not in _joined(exp)
+
+
 def test_explanation_roundtrips_to_dict():
     d = explain_grade("math500", r"\boxed{4}", "4").to_dict()
     assert d["score"] == 1.0 and d["kind"] == "math"
