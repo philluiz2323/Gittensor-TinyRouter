@@ -108,3 +108,25 @@ if __name__ == "__main__":
     import pytest
 
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_null_question_ids_are_not_a_spurious_duplicate():
+    # A present question_id: None is "no id", not a collision -- str(None) would
+    # otherwise group two null-id items under a bogus "None" duplicate.
+    report = audit_dataset([_item(None, "q one"), _item(None, "q two"), _item("real", "z")])
+    q = report.per_benchmark["math500"]
+    assert q.duplicate_ids == []
+
+
+def test_missing_and_blank_question_ids_are_not_duplicates():
+    report = audit_dataset([
+        {"question_id": "", "question_text": "a", "correct_answer": "1", "benchmark": "math500"},
+        {"question_text": "b", "correct_answer": "2", "benchmark": "math500"},  # id key absent
+        {"question_id": None, "question_text": "c", "correct_answer": "3", "benchmark": "math500"},
+    ])
+    assert report.per_benchmark["math500"].duplicate_ids == []
+
+
+def test_real_duplicate_ids_still_flagged_alongside_null_ids():
+    report = audit_dataset([_item(None, "x"), _item("dup", "y"), _item("dup", "z")])
+    assert report.per_benchmark["math500"].duplicate_ids == ["dup"]

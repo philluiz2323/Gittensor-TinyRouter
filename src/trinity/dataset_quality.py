@@ -133,7 +133,14 @@ def audit_dataset(items: Iterable[Mapping[str, Any]]) -> DatasetQualityReport:
     for benchmark, group in grouped.items():
         q = BenchmarkQuality(benchmark=benchmark, n_items=len(group))
 
-        id_counts = Counter(str(it.get("question_id", "")) for it in group)
+        # ``or ""`` + the blank filter mirror the question_text path below: a
+        # missing/``None`` question_id is "no id", not an id collision. Without the
+        # guard, ``str(None)`` groups null-id items under a spurious ``"None"``
+        # duplicate id (which also inflates the total quality-flag count).
+        id_counts = Counter(
+            str(it.get("question_id") or "") for it in group
+            if str(it.get("question_id") or "").strip()
+        )
         q.duplicate_ids = sorted(i for i, c in id_counts.items() if c > 1)
 
         # ``or ""`` (not the get-default) so a present ``question_text: None`` is
