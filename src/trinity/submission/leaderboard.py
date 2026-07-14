@@ -37,6 +37,11 @@ def _is_num(x: Any) -> TypeGuard[float]:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+def _as_list(x: Any) -> list[Any]:
+    """``x`` if it is a JSON array, else ``[]`` (a non-list is flagged, not iterated)."""
+    return x if isinstance(x, list) else []
+
+
 def _in_unit(x: Any) -> bool:
     return _is_num(x) and -_TOL <= x <= 1.0 + _TOL
 
@@ -61,7 +66,16 @@ def _verify_bench(name: str, entry: Any, problems: list[str]) -> None:
         problems.append(f"{tag}: not a JSON object")
         return
 
-    history = entry.get("history") or []
+    # A tampered record can carry a non-list `history`/`attempts` (a scalar where an
+    # array belongs); flag it and treat as empty rather than crashing on iteration.
+    raw_history = entry.get("history")
+    if raw_history is not None and not isinstance(raw_history, list):
+        problems.append(f"{tag}.history is not a JSON array")
+    history = _as_list(raw_history)
+    raw_attempts = entry.get("attempts")
+    if raw_attempts is not None and not isinstance(raw_attempts, list):
+        problems.append(f"{tag}.attempts is not a JSON array")
+
     # score fields in [0, 1]; a best_score above the oracle ceiling is impossible.
     bs = entry.get("best_score")
     if not _in_unit(bs):
@@ -146,10 +160,10 @@ def _verify_bench(name: str, entry: Any, problems: list[str]) -> None:
             prev_ats = ats
 
     # every win must have a recorded attempt (a truncated ledger = rate-limit bypass).
-    # Only enforced when the explicit `attempts` ledger exists (else it falls back to
-    # history and the check is vacuous).
-    if entry.get("attempts") is not None:
-        att_pairs = {(a.get("miner"), a.get("pr")) for a in entry["attempts"] if isinstance(a, dict)}
+    # Only enforced when the explicit `attempts` ledger exists as a list (else it falls
+    # back to history and the check is vacuous).
+    if isinstance(raw_attempts, list):
+        att_pairs = {(a.get("miner"), a.get("pr")) for a in raw_attempts if isinstance(a, dict)}
         for i, h in enumerate(history):
             if isinstance(h, dict) and (h.get("miner"), h.get("pr")) not in att_pairs:
                 problems.append(
@@ -177,7 +191,7 @@ def verify_leaderboard(lb: Mapping[str, Any]) -> list[str]:
         _verify_bench(name, entry, problems)
         if isinstance(entry, dict):
             for coll in ("history", "attempts"):
-                for e in (entry.get(coll) or []):
+                for e in _as_list(entry.get(coll)):
                     if isinstance(e, dict):
                         ts = parse_utc_timestamp(e.get("timestamp", ""))
                         if ts is not None and (newest is None or ts > newest):

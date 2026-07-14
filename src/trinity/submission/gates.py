@@ -100,10 +100,17 @@ def parse_utc_timestamp(ts_str: str) -> Optional[float]:
 
 
 def rate_limit_entries(bench_entry: dict[str, Any]) -> list[dict[str, Any]]:
+    # A tampered leaderboard.json can carry a non-list `attempts`/`history` (a scalar
+    # written where an array belongs); iterating it must not crash the gate or the
+    # verifier that share this accessor. A non-list ledger yields no entries -- the
+    # integrity verifier flags the malformation separately (report, don't crash).
+    if not isinstance(bench_entry, dict):
+        return []
     attempts = bench_entry.get("attempts")
     if attempts is not None:
-        return list(attempts)
-    return list(bench_entry.get("history", []))
+        return list(attempts) if isinstance(attempts, list) else []
+    history = bench_entry.get("history")
+    return list(history) if isinstance(history, list) else []
 
 
 def check_rate_limit(
@@ -113,7 +120,8 @@ def check_rate_limit(
     *,
     current_pr: int | None = None,
 ) -> Optional[str]:
-    bench_entry = leaderboard.get("benchmarks", {}).get(benchmark, {})
+    benches = leaderboard.get("benchmarks", {})
+    bench_entry = benches.get(benchmark, {}) if isinstance(benches, dict) else {}
     entries = rate_limit_entries(bench_entry)
     cutoff = time.time() - RATE_LIMIT_WINDOW_DAYS * 86400
     recent = 0

@@ -163,3 +163,51 @@ def test_verify_does_not_mutate_input():
     before = copy.deepcopy(lb)
     verify_leaderboard(lb)
     assert lb == before   # read-only
+
+
+# --------------------------------------------------------------------------- #
+# Robustness: a tampered/corrupt record must be REPORTED, never crash the
+# verifier or the live rate-limit gate that share rate_limit_entries. Same
+# "report, don't crash" contract as the #201 verify_benchmark fix.
+# --------------------------------------------------------------------------- #
+from trinity.submission.gates import (  # noqa: E402  (grouped with the robustness tests)
+    check_rate_limit,
+    rate_limit_entries,
+)
+
+
+@pytest.mark.parametrize("field", ["attempts", "history"])
+@pytest.mark.parametrize("bad", [5, True, "x", {"not": "a list"}])
+def test_non_list_attempts_or_history_is_reported_not_crash(field, bad):
+    lb = _clean()
+    lb["benchmarks"]["math500"][field] = bad
+    problems = verify_leaderboard(lb)                       # must not raise
+    assert any(f"{field} is not a JSON array" in p for p in problems)
+
+
+def test_non_dict_benchmark_entry_is_reported_not_crash():
+    lb = _clean()
+    lb["benchmarks"]["math500"] = 7                          # scalar where an object belongs
+    assert any("not a JSON object" in p for p in verify_leaderboard(lb))
+
+
+def test_rate_limit_entries_tolerates_malformed_ledgers():
+    assert rate_limit_entries({"attempts": 5}) == []        # non-list attempts
+    assert rate_limit_entries({"history": True}) == []      # non-list history fallback
+    assert rate_limit_entries(9) == []                      # non-dict bench entry
+    # well-formed still passes through unchanged
+    row = {"miner": "a", "pr": 1, "timestamp": _T0}
+    assert rate_limit_entries({"attempts": [row]}) == [row]
+    assert rate_limit_entries({"history": [row]}) == [row]  # falls back to history
+
+
+@pytest.mark.parametrize("lb", [
+    {"benchmarks": {"math500": {"attempts": True}}},        # non-list attempts
+    {"benchmarks": {"math500": {"history": 3}}},            # non-list history
+    {"benchmarks": {"math500": 9}},                         # non-dict entry
+    {"benchmarks": 7},                                      # non-dict benchmarks map
+])
+def test_check_rate_limit_never_crashes_on_tampered_leaderboard(lb):
+    # A corrupt ledger must not crash the anti-cheat gate; it degrades to "no prior
+    # attempts" (the integrity verifier is the layer that flags the tampering).
+    assert check_rate_limit("miner", "math500", lb) is None
