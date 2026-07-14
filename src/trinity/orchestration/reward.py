@@ -54,6 +54,7 @@ __all__ = [
     "normalize_math_answer",
     "math_equal",
     "extract_choice_letter",
+    "normalize_reference_letter",
     "extract_code",
     "run_pass_at_1",
     "MATH_BENCHMARKS",
@@ -795,13 +796,13 @@ def _check_choice(candidate: str, reference: object) -> bool:
     got = extract_choice_letter(candidate)
     if got is None:
         return False
-    ref = _normalize_reference_letter(reference)
+    ref = normalize_reference_letter(reference)
     if ref is None:
         return False
     return got == ref
 
 
-def _normalize_reference_letter(reference: object) -> str | None:
+def normalize_reference_letter(reference: object) -> str | None:
     """Coerce a reference answer to a single ``A``-``D`` letter.
 
     Accepts a letter string (``"B"``, ``"(B)"``) or a 0-based / 1-based integer

@@ -97,13 +97,19 @@ def _explain_math(R: Any, candidate: str, reference: str,
                      "equivalence was found")
 
 
-def _explain_choice(R: Any, candidate: str, reference: str,
+def _explain_choice(R: Any, candidate: str, reference: object,
                     steps: list[str], detail: dict[str, Any]) -> None:
+    # Resolve the reference through the grader's OWN normalizer, not ad-hoc string
+    # slicing: the grader accepts an integer index (1 -> "B") and rejects a
+    # non-letter string, so re-deriving the letter here would contradict the real
+    # grade (e.g. "Beta particle"[:1] == "B" fabricates a match for a 0-scored answer).
     got = R.extract_choice_letter(candidate)
-    ref_letter = R.extract_choice_letter(reference) or reference.strip().upper()[:1]
+    ref_letter = R.normalize_reference_letter(reference)
     steps.append(f"extract choice: candidate -> {got!r}; reference -> {ref_letter!r}")
     detail.update(extracted_letter=got, reference_letter=ref_letter)
-    if got is None:
+    if ref_letter is None:
+        steps.append(f"no match: reference {reference!r} is not a resolvable choice letter")
+    elif got is None:
         steps.append("no match: no choice letter (A-D) could be extracted from the candidate")
     elif got == ref_letter:
         steps.append("match: extracted letter equals the reference letter")
@@ -144,7 +150,9 @@ def explain_grade(benchmark: str, candidate: str, reference: object) -> GradeExp
         _explain_math(R, candidate, ref_str, steps, detail)
     elif key in R.CHOICE_BENCHMARKS:
         kind = "choice"
-        _explain_choice(R, candidate, ref_str, steps, detail)
+        # Pass the RAW reference (not ref_str) so the explainer can resolve an
+        # integer index the same way the grader does.
+        _explain_choice(R, candidate, reference, steps, detail)
     elif key in R.CODE_BENCHMARKS:
         kind = "code"
         has = R.has_answer(key, candidate)

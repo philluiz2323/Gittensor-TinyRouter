@@ -123,3 +123,29 @@ if __name__ == "__main__":
     import pytest
 
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_choice_integer_reference_trace_matches_grade():
+    # MMLU sets often store the answer as a 0-based index; grader maps 1 -> "B".
+    exp = explain_grade("mmlu", "After thought, the answer is B.", 1)
+    assert exp.correct and exp.score == 1.0
+    assert exp.detail["reference_letter"] == "B"      # not the string "1"
+    assert any("match:" in s and not s.startswith("no match") for s in exp.steps)
+
+
+def test_choice_nonletter_reference_is_not_fabricated_into_a_match():
+    # The grader rejects a non-letter reference (score 0); the trace must NOT
+    # fabricate "B" from "Beta particle"[:1] and claim a match.
+    exp = explain_grade("mmlu", "The answer is B.", "Beta particle")
+    assert not exp.correct and exp.score == 0.0
+    assert exp.detail["reference_letter"] is None
+    assert not any("match:" in s and not s.startswith("no match") for s in exp.steps)
+
+
+def test_choice_reference_letter_equals_the_grader_normalizer():
+    from trinity.orchestration.reward import normalize_reference_letter
+    for ref in (1, "C", "Beta particle", 3):
+        exp = explain_grade("mmlu", "the answer is B.", ref)
+        assert exp.detail["reference_letter"] == normalize_reference_letter(ref)
+        matched = any("match:" in s and not s.startswith("no match") for s in exp.steps)
+        assert matched == (exp.score == 1.0)  # trace never contradicts the grade
