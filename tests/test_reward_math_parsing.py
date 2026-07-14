@@ -27,6 +27,22 @@ def test_extract_boxed_takes_last_match():
     assert R.extract_boxed(text) == "new"
 
 
+def test_extract_boxed_skips_an_empty_box():
+    # An empty \boxed{} carries no answer: return None, not "".
+    assert R.extract_boxed(r"\boxed{}") is None
+    assert R.extract_boxed(r"\boxed{  }") is None
+    # A real earlier box is recovered when the last box is empty.
+    assert R.extract_boxed(r"\boxed{5} then \boxed{}") == "5"
+
+
+def test_has_answer_false_for_empty_box():
+    # has_answer must not report a content-less box as a present answer.
+    assert R.has_answer("math500", r"\boxed{}") is False
+    # but a box with content, or a trailing number, still counts.
+    assert R.has_answer("math500", r"\boxed{5}") is True
+    assert R.has_answer("math500", r"\boxed{} but the total is 5") is True
+
+
 # --- extract_last_number ---
 
 

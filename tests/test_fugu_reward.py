@@ -41,6 +41,14 @@ def test_committed_answer_recovers_from_a_non_boxed_final_step():
     assert is_correct(run, MATH) == 1  # not a false negative
 
 
+def test_empty_boxed_final_does_not_shadow_a_real_earlier_answer():
+    # A later turn that re-boxes empty ("\boxed{}") must not be selected as the
+    # committed answer over an earlier turn that boxed the real value.
+    run = _run("Reformatting: \\boxed{}", steps=[_step("\\boxed{4}")])
+    assert committed_answer("math500", run) == "\\boxed{4}"
+    assert is_correct(run, MATH) == 1  # the produced answer 4 is not thrown away
+
+
 def test_dollar_amount_is_not_a_false_negative():
     # Regression: "$18.90" gold vs "18.90" answer must grade correct (the shared
     # grader stripped bare "$" before "\\$", leaving "\\18.90"). Surfaced by the

@@ -376,7 +376,13 @@ def extract_boxed(text: str) -> str | None:
         if end == -1:
             # Unbalanced; stop scanning further occurrences.
             break
-        results.append(text[start:end].strip())
+        content = text[start:end].strip()
+        # Skip an empty ``\boxed{}``: it carries no answer, so it must not be
+        # returned as ``""`` (which reads as a present answer to ``has_answer`` and
+        # shadows a real earlier box in ``_committed_answer``). Fall through to the
+        # last box that actually has content, else ``None``.
+        if content:
+            results.append(content)
         idx = end + 1
     return results[-1] if results else None
 
