@@ -359,3 +359,32 @@ def test_run_offline_gates_stops_at_first_failure(tmp_path):
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-q"])
+
+
+def test_run_offline_gates_collect_all_runs_every_gate(tmp_path):
+    # An all-zero head fails the weights gate; with collect_all every later gate
+    # still runs, so a miner sees all problems at once (docstring's promise).
+    pack = _pack(tmp_path, _valid_receipt(),
+                 head=np.zeros(EXPECTED_HEAD_SHAPE), svf=np.full(7 * 1024, 1.0))
+    results = G.run_offline_gates(pack, _ctx(tmp_path), collect_all=True)
+    assert [r.gate for r in results] == [g.name for g in G.OFFLINE_GATES]
+    assert any(r.gate == "weights" and r.failed for r in results)
+
+
+def test_run_offline_gates_default_is_still_fail_fast(tmp_path):
+    pack = _pack(tmp_path, _valid_receipt(),
+                 head=np.zeros(EXPECTED_HEAD_SHAPE), svf=np.full(7 * 1024, 1.0))
+    results = G.run_offline_gates(pack, _ctx(tmp_path))
+    assert [r.gate for r in results] == ["rate_limit", "weights"]
+
+
+def test_run_offline_gates_collect_all_captures_a_raising_gate(tmp_path):
+    def _boom(pack, ctx):
+        raise RuntimeError("kaboom")
+
+    gates = (G.SubmissionGate("boom", _boom), G.SubmissionGate("after", lambda p, c: None))
+    results = G.run_offline_gates(_pack(tmp_path, _valid_receipt()), _ctx(tmp_path),
+                                  gates=gates, collect_all=True)
+    assert [r.gate for r in results] == ["boom", "after"]
+    assert results[0].failed and "gate_error" in (results[0].reason or "")
+    assert results[1].ok  # the raising gate did not abort the collection

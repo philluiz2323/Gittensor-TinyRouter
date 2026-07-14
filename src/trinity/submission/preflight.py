@@ -91,7 +91,9 @@ class PreflightRunner:
             submissions_root=self.submissions_root,
             ledger_path=self.ledger_path,
         )
-        results = run_offline_gates(pack, ctx)
+        # Local preflight surfaces ALL problems at once (a miner fixes their
+        # submission before opening a PR); pr_eval's scoring path stays fail-fast.
+        results = run_offline_gates(pack, ctx, collect_all=True)
         return PreflightReport(pack=pack, benchmark=self.benchmark, results=results)
 
 

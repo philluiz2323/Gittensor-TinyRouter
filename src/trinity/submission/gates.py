@@ -451,12 +451,27 @@ def run_offline_gates(
     ctx: PreflightContext,
     *,
     gates: tuple[SubmissionGate, ...] = OFFLINE_GATES,
+    collect_all: bool = False,
 ) -> list[GateResult]:
-    """Run gates in order; continues through all gates when ``collect_all=True`` is needed."""
+    """Run the offline gates in order.
+
+    By default this is **fail-fast** — it stops at the first failing gate, matching
+    the scoring path. With ``collect_all=True`` every gate runs so a caller (e.g.
+    the local :class:`~trinity.submission.preflight.PreflightRunner`) can surface
+    all problems in one pass instead of one-per-run. A gate that raises is captured
+    as a failing :class:`GateResult` rather than aborting the collection, since a
+    later gate may assume an earlier one passed.
+    """
     results: list[GateResult] = []
     for gate in gates:
-        result = run_gate(gate, pack, ctx)
+        try:
+            result = run_gate(gate, pack, ctx)
+        except Exception as exc:  # noqa: BLE001 - a later gate may assume earlier ones passed
+            result = GateResult(
+                gate=gate.name, ok=False,
+                reason=f"gate_error: {type(exc).__name__}: {exc}",
+            )
         results.append(result)
-        if result.failed:
+        if result.failed and not collect_all:
             break
     return results
