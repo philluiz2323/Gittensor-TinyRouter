@@ -150,7 +150,18 @@ def analyze_run(
     # best-so-far never improved OR the population's objective ended below where it
     # started (a genuine regression). Sign-only, so noisy per-gen fluctuation that
     # still nets upward is not falsely flagged.
-    signal_regressed = bool(signal) and signal[-1] < signal[0] - tol
+    #
+    # This regression test is meaningful ONLY for sep-CMA-ES, whose ``signal`` is
+    # the population-mean objective (expected to climb, so ending below its start
+    # is a real collapse). The Random-Search ``signal`` is the i.i.d. fitness of
+    # each independently sampled random theta -- there is no trajectory, so its
+    # last draw being below its first is pure noise (~50% of healthy runs).
+    # Applying the test to RS falsely flags an improving run as degenerate,
+    # contradicting its own ``improved=True``. RS degeneracy rests solely on
+    # ``not improved`` (best-so-far never rose).
+    signal_regressed = (
+        trainer == "sep_cmaes" and bool(signal) and signal[-1] < signal[0] - tol
+    )
     degenerate = (not improved) or signal_regressed
     return RunConvergence(
         run_id=rid, benchmark=benchmark, trainer=trainer, n_iters=n,
