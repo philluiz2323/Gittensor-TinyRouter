@@ -711,14 +711,28 @@ def _strip_choice_font_wrappers(text: str) -> str:
     return text
 
 
-_CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
+# Unambiguous commitment phrasings. A letter carried by any of these IS the answer
+# the model is asserting, so the one that occurs LAST in the text is the committed
+# answer (a model may reason toward one choice in prose and then commit another with
+# a different phrasing — most commonly interim prose + a final ``\boxed{...}``).
+_COMMITTED_ANSWER_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
     re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-J])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
     re.compile(r"\\boxed\s*\{\s*\(?\s*([A-J])\s*\)?\s*\}", re.I),
     re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-J])(?![A-Za-z])", re.I),
+)
+# Weaker cues, kept as strictly lower tiers so they never override a committed answer:
+# ``option B`` often *discusses* a choice ("option B is wrong"), and a bare ``B)`` line
+# is usually part of an option list the model echoes back. Each is taken as its own
+# last match, in priority order, only when no committed-answer pattern matched.
+_FALLBACK_CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\boption\s*\(?\s*([A-J])(?![A-Za-z])", re.I),
     re.compile(r"^\s*\(?\s*([A-J])\s*[\).:]", re.M),
+)
+# Kept for anything that referenced the combined set (order = priority).
+_CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    _COMMITTED_ANSWER_PATTERNS + _FALLBACK_CHOICE_PATTERNS
 )
 
 
@@ -743,12 +757,25 @@ def extract_choice_letter(text: str) -> str | None:
     # Unwrap LaTeX font/emphasis commands first, so a boxed but formatted letter
     # (``\boxed{\text{B}}``, ``\textbf{C}``) is matched exactly like a bare one.
     text = _strip_choice_font_wrappers(text)
-    for pat in _CHOICE_PATTERNS:
-        # Take the LAST match of each pattern: the model may discuss or revise a
-        # choice before committing ("the answer is A ... on reflection, C"), so
-        # the final occurrence is the committed answer. This mirrors the "final
-        # answers usually come last" contract also honoured by extract_boxed and
-        # trinity.roles.verifier.parse_verdict.
+    # Among the unambiguous commitment phrasings, the committed answer is the one
+    # that occurs LAST in the text — a model may reason toward one choice and then
+    # commit another with a different phrasing (most often interim prose + a final
+    # ``\boxed{...}``). "Last committed wins" is honoured ACROSS these patterns, not
+    # only within one, so pattern priority no longer lets an earlier "answer is B"
+    # beat a later ``\boxed{D}``. Priority is only a tie-break for matches ending at
+    # the same position. This mirrors the "final answers usually come last" contract
+    # also honoured by extract_boxed and trinity.roles.verifier.parse_verdict.
+    best: tuple[tuple[int, int], str] | None = None
+    for priority, pat in enumerate(_COMMITTED_ANSWER_PATTERNS):
+        for cm in pat.finditer(text):
+            key = (cm.end(), -priority)
+            if best is None or key > best[0]:
+                best = (key, cm.group(1).upper())
+    if best is not None:
+        return best[1]
+    # No committed-answer phrasing: fall back to the weaker cues, each as its own
+    # last match in priority order. These never override a committed answer above.
+    for pat in _FALLBACK_CHOICE_PATTERNS:
         matches = list(pat.finditer(text))
         if matches:
             return matches[-1].group(1).upper()

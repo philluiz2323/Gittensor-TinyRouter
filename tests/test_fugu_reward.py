@@ -93,6 +93,35 @@ def test_choice_takes_final_committed_answer_not_the_first():
     assert R.score_text("mmlu", "The answer is D. Actually the answer is B.", "D") == 0.0
 
 
+def test_choice_last_committed_answer_wins_across_different_phrasings():
+    # "Last committed wins" must hold ACROSS the commitment patterns, not only
+    # within one. A model instructed to box its final answer commonly reasons in
+    # prose ("the answer is B") and then commits a *different*, boxed final (D).
+    # The boxed final is the committed answer; the earlier prose guess is discarded.
+    from trinity.orchestration import reward as R
+
+    assert R.extract_choice_letter("The answer is B.\n\nFinal answer: \\boxed{D}") == "D"
+    assert R.extract_choice_letter("So the answer is C. \\boxed{A}") == "A"
+    # End-to-end: boxing the correct final after a wrong prose guess is not a false
+    # negative, and the discarded prose guess is not a false positive.
+    assert R.score_text("mmlu", "The answer is B. Final answer: \\boxed{D}", "D") == 1.0
+    assert R.score_text("mmlu", "The answer is B. Final answer: \\boxed{D}", "B") == 0.0
+
+
+def test_choice_weak_cues_never_override_a_committed_answer():
+    # The fix must not regress the discussion / option-echo cases: a committed
+    # answer outranks a later "option X" mention and a trailing option list.
+    from trinity.orchestration import reward as R
+
+    # "option B is wrong" is discussion, not a commitment -> the committed C wins.
+    assert R.extract_choice_letter("The answer is C. Option B is wrong.") == "C"
+    # An echoed option list after the commit must not override it.
+    assert R.extract_choice_letter("The answer is B.\nA) one\nB) two\nC) three\nD) four") == "B"
+    # With no committed-answer phrasing, the weaker cues still resolve a letter.
+    assert R.extract_choice_letter("Option C") == "C"
+    assert R.extract_choice_letter("C)") == "C"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
