@@ -712,6 +712,26 @@ def _strip_choice_font_wrappers(text: str) -> str:
     return text
 
 
+# Markdown emphasis wrapping a lone choice letter — ``**B**``, ``*E*``, ``__A__``,
+# ``` `F` ```. Bolding the final answer letter is a very common model format, and it
+# hid the letter from the commitment patterns (the ``*``/``_`` sat between "answer is"
+# and the letter). This mirrors the LaTeX unwrap above and the Markdown tolerance in
+# ``roles.verifier.VERDICT_RE``. The backreference requires the SAME marker on both
+# sides of a single ``A-J``, and the ``(?<![\w*])`` / ``(?![\w*])`` guards keep it from
+# touching ``snake_case`` identifiers (``MAX_A_VAL``) or longer marker runs, so any text
+# that is not exactly ``<marker>LETTER<marker>`` is left byte-identical.
+_CHOICE_MD_EMPHASIS_RE = re.compile(r"(?<![\w*])(\*\*|\*|__|_|`)([A-Ja-j])\1(?![\w*])")
+
+
+def _strip_choice_md_emphasis(text: str) -> str:
+    """Unwrap Markdown emphasis around a single choice letter (idempotent per pass)."""
+    prev = None
+    while prev != text:
+        prev = text
+        text = _CHOICE_MD_EMPHASIS_RE.sub(r"\2", text)
+    return text
+
+
 # Unambiguous commitment phrasings. A letter carried by any of these IS the answer
 # the model is asserting, so the one that occurs LAST in the text is the committed
 # answer (a model may reason toward one choice in prose and then commit another with
@@ -756,8 +776,10 @@ def extract_choice_letter(text: str) -> str | None:
     if not text:
         return None
     # Unwrap LaTeX font/emphasis commands first, so a boxed but formatted letter
-    # (``\boxed{\text{B}}``, ``\textbf{C}``) is matched exactly like a bare one.
+    # (``\boxed{\text{B}}``, ``\textbf{C}``) is matched exactly like a bare one, and
+    # Markdown emphasis (``**B**``, ``*E*``) so a bolded final letter is matched too.
     text = _strip_choice_font_wrappers(text)
+    text = _strip_choice_md_emphasis(text)
     # Among the unambiguous commitment phrasings, the committed answer is the one
     # that occurs LAST in the text — a model may reason toward one choice and then
     # commit another with a different phrasing (most often interim prose + a final
