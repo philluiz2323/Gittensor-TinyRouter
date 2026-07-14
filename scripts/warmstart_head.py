@@ -32,6 +32,7 @@ sys.path.insert(0, str(_REPO / "src"))
 
 from trinity.coordinator import params as P  # noqa: E402
 from trinity.coordinator import warmstart as WS  # noqa: E402
+from trinity.types import ROLE_ORDER  # noqa: E402
 
 
 def _run_fit(args) -> int:
@@ -45,7 +46,13 @@ def _run_fit(args) -> int:
             "they must be the SAME queries in the SAME order (re-run --encode on this split)"
         )
     n_models = len(models)
-    spec = P.make_spec(n_a=args.n_a, d_h=enc.shape[1], n_svf=args.n_svf)
+    # The head is (n_a, d_h) with n_models agent rows + len(ROLE_ORDER) role rows,
+    # and LinearHead/CoordinatorPolicy hard-require n_a == n_models + len(ROLE_ORDER).
+    # Derive n_a from the pool the matrix actually describes; a fixed default (6)
+    # only matches a 3-model pool and otherwise packs a wrong-length theta that
+    # load_warmstart_theta then rejects. An explicit --n-a still overrides.
+    n_a = args.n_a if args.n_a is not None else n_models + len(ROLE_ORDER)
+    spec = P.make_spec(n_a=n_a, d_h=enc.shape[1], n_svf=args.n_svf)
     Wa, losses = WS.fit_agent_head(
         enc, solve_prob, n_models=n_models, steps=args.steps, lr=args.lr,
         l2=args.l2, tau=args.tau, prefer_disagree=not args.no_disagree,
@@ -95,7 +102,9 @@ def main() -> None:
     ap.add_argument("--matrix", help="oracle_matrix_<bench>.json (per-(query,model) labels)")
     ap.add_argument("--encodings", help="encodings .npy aligned with the matrix tasks")
     ap.add_argument("--out", default="warm_theta.npy")
-    ap.add_argument("--n-a", type=int, default=P.DEFAULT_N_A, dest="n_a")
+    ap.add_argument("--n-a", type=int, default=None, dest="n_a",
+                    help="head output width; default derives n_models + len(ROLE_ORDER) "
+                         "from the matrix's pool (the only width the coordinator accepts)")
     ap.add_argument("--n-svf", type=int, default=P.DEFAULT_N_SVF, dest="n_svf")
     ap.add_argument("--steps", type=int, default=400)
     ap.add_argument("--lr", type=float, default=0.5)

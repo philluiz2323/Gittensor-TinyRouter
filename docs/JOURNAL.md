@@ -43,6 +43,30 @@ which writes `b"\xff\xfe..."` and asserts `None` (it raised `UnicodeDecodeError`
 
 ---
 
+## 2026-07-13 — warm-start head was sized from a fixed n_a=6, not the pool it fit  #mistake #finding
+**Context:** auditing `scripts/warmstart_head.py` (IMPROVEMENTS.md #2) — the fit mode reads a
+per-(query, model) oracle matrix, learns the head's agent rows, and packs a CMA-ES initial theta.
+**Expected:** the packed warm-start theta loads into the coordinator built for the same pool.
+**Actual:** for any pool that is not exactly 3 models, `train --warmstart-theta` (via
+`load_warmstart_theta`) rejected it with `ValueError: ... has N params, expected spec.n_total=M`.
+The fit itself succeeded, so the feature silently produced an unusable artifact.
+**Root cause:** `_run_fit` derives `n_models = len(models)` from the matrix but sized the head with
+`P.make_spec(n_a=args.n_a, ...)` where `--n-a` defaults to the constant `P.DEFAULT_N_A = 6`. The
+head is `(n_a, d_h)` with `n_models` agent rows + `len(ROLE_ORDER)=3` role rows, and both
+`LinearHead.__init__` and `CoordinatorPolicy.build` hard-require `n_a == n_models + 3`. `6` is only
+correct at `n_models == 3` (the production pool), so a 4-model pool needs `n_a=7` but got `6` — the
+theta is one head-row (`d_h` floats) short and the downstream length check refuses it. The script
+had `n_models` in hand and ignored it; the fixed default happened to be right for the only pool the
+tests exercise, so nothing caught it.
+**Fix / decision:** default `--n-a` to `None` and derive `n_a = n_models + len(ROLE_ORDER)` from the
+matrix's pool. An explicit `--n-a` still overrides (backward compatible; the 3-model path is
+unchanged since the derived width is again 6). Covered by
+`test_run_fit_sizes_head_from_pool_for_non_three_model_pools` (a 4-model pool: the packed theta now
+loads under `make_spec(n_a=n_models+3)`; it raised before) and an explicit-override test.
+**Follow-up:** none.
+
+---
+
 ## 2026-07-12 — Radical canonicalization changed a font-wrapper regression expectation  #mistake #repro
 
 **Context:** running the full CI suite after combining the font-wrapper and sqrt-normalization

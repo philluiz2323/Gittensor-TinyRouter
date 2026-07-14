@@ -4,12 +4,12 @@ Pure numpy, NO torch (the dev box has no torch). Covers: specialist routing is
 learned, the InfoNCE/CE loss decreases, packing places weights in the correct
 theta slots, and label loading from the oracle_matrix schema.
 """
+import argparse
 import json
 import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
@@ -170,3 +170,82 @@ def test_encode_queries_instruction_prefixes_inside_the_envelope(monkeypatch):
 
     W.encode_queries(["2+2?"], model_name="stub", instruction="Hint: ")
     assert seen == [_transcript_text("Hint: 2+2?", [])]
+
+
+# ---------------------------------------------------------------------------
+# scripts/warmstart_head.py fit-mode head width (derived from the pool)
+# ---------------------------------------------------------------------------
+def _load_warmstart_head_script():
+    """Import scripts/warmstart_head.py as a module (torch-free in fit mode)."""
+    import importlib.util
+
+    path = _REPO / "scripts" / "warmstart_head.py"
+    spec = importlib.util.spec_from_file_location("warmstart_head", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["warmstart_head"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _write_oracle_matrix(path: Path, n_models: int, n_tasks: int, seed: int = 0) -> None:
+    """Write a minimal oracle_matrix_<bench>.json for an ``n_models``-model pool."""
+    rng = np.random.default_rng(seed)
+    models = [f"m{i}" for i in range(n_models)]
+    tasks = [
+        {"id": f"q{i}", "per_model": {m: [float(rng.random())] for m in models}}
+        for i in range(n_tasks)
+    ]
+    path.write_text(json.dumps({"tasks": tasks}))
+
+
+def test_run_fit_sizes_head_from_pool_for_non_three_model_pools(tmp_path):
+    """A 4-model warm-start must produce a theta the coordinator accepts.
+
+    Regression for the fixed-``n_a=6`` default: it only matches a 3-model pool, so
+    for any other pool the packed theta had the wrong length and ``load_warmstart_theta``
+    rejected it — even though the fit itself succeeded. The width must be derived
+    from the pool (``n_models + len(ROLE_ORDER)``).
+    """
+    from trinity.types import ROLE_ORDER
+
+    wsh = _load_warmstart_head_script()
+    n_models, d_h, n_tasks, n_svf = 4, 16, 20, 32
+
+    matrix = tmp_path / "oracle_matrix.json"
+    _write_oracle_matrix(matrix, n_models, n_tasks)
+    enc_path = tmp_path / "enc.npy"
+    np.save(enc_path, np.random.default_rng(1).normal(size=(n_tasks, d_h)))
+    out_path = tmp_path / "warm.npy"
+
+    args = argparse.Namespace(
+        matrix=str(matrix), encodings=str(enc_path), out=str(out_path),
+        n_a=None, n_svf=n_svf, steps=5, lr=0.5, l2=1e-3, tau=1.0,
+        target_temp=0.5, no_disagree=False, seed=0,
+    )
+    assert wsh._run_fit(args) == 0
+
+    # The warm theta must load under the pool's real spec (n_a = n_models + roles).
+    spec = P.make_spec(n_a=n_models + len(ROLE_ORDER), d_h=d_h, n_svf=n_svf)
+    theta = W.load_warmstart_theta(str(out_path), spec)  # must NOT raise
+    assert theta.size == spec.n_total
+
+
+def test_run_fit_explicit_n_a_still_honored(tmp_path):
+    """An explicit --n-a overrides the derived width (backward compatibility)."""
+    wsh = _load_warmstart_head_script()
+    n_models, d_h, n_tasks, n_svf = 3, 16, 12, 32
+
+    matrix = tmp_path / "oracle_matrix.json"
+    _write_oracle_matrix(matrix, n_models, n_tasks)
+    enc_path = tmp_path / "enc.npy"
+    np.save(enc_path, np.random.default_rng(2).normal(size=(n_tasks, d_h)))
+    out_path = tmp_path / "warm.npy"
+
+    args = argparse.Namespace(
+        matrix=str(matrix), encodings=str(enc_path), out=str(out_path),
+        n_a=6, n_svf=n_svf, steps=5, lr=0.5, l2=1e-3, tau=1.0,
+        target_temp=0.5, no_disagree=False, seed=0,
+    )
+    assert wsh._run_fit(args) == 0
+    theta = np.load(out_path)
+    assert theta.size == 6 * d_h + n_svf
