@@ -30,6 +30,7 @@ def _load(name: str):
 
 
 vb = _load("verify_benchmark")
+protocol = _load("benchmark_protocol")
 
 
 def _run(monkeypatch, argv: list[str]) -> None:
@@ -74,3 +75,20 @@ def test_self_consistency_bad_meta_reports_cleanly(monkeypatch, capsys, tmp_path
         _run(monkeypatch, ["--meta", str(meta_path)])
     assert exc.value.code == 1
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_append_requires_full_dir_verification(monkeypatch, capsys, tmp_path):
+    splits = {
+        "eval": [{"question_id": "q1", "benchmark": "math500", "task_type": "math",
+                  "question_text": "1+1?", "correct_answer": "2", "model_answers": {}}],
+        "audit": [],
+        "live": [],
+    }
+    meta_path = tmp_path / "meta.json"
+    meta_path.write_text(json.dumps(protocol.build_manifest(
+        "math500", splits, seed=protocol.SEALED_SEED, created_at="t",
+    )))
+    with pytest.raises(SystemExit) as exc:
+        _run(monkeypatch, ["--meta", str(meta_path), "--append", str(tmp_path / "hashes.txt")])
+    assert exc.value.code == 2
+    assert "full --dir" in capsys.readouterr().out

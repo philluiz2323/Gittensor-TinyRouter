@@ -192,6 +192,9 @@ def main() -> None:
     # before this point crashed the verifier on the very case it exists to report —
     # a build missing meta.json — instead of printing the FAIL report.
     meta = json.loads(meta_path.read_text())
+    if args.append and not args.dir:
+        print("ERROR: --append requires full --dir verification (not --meta self-consistency)")
+        sys.exit(2)
     print(f"OK [{mode}] — {meta.get('benchmark')} verified, hash {meta.get('content_hash')}")
     if args.append:
         wrote = append_hash(args.append, str(meta.get("benchmark")), str(meta.get("content_hash")))
