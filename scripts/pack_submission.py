@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -121,6 +122,19 @@ def next_generation(submissions_dir: Path) -> int:
     return max(nums) + 1 if nums else 1
 
 
+def _theta_generation(path: Path) -> tuple[int, str]:
+    """Sort key selecting the latest-generation ``best_theta*`` file.
+
+    Parses the integer generation from names like ``best_theta_gen11.npy`` so gen 11
+    ranks above gen 9 — a plain string sort orders ``'gen11' < 'gen9'`` and would pick an
+    OLDER generation. A file with no encoded generation falls back to name order
+    (preserving the previous lexicographic pick when no generation is present). Mirrors
+    the repo's integer-generation convention (``gates._same_generation``, #262).
+    """
+    m = re.search(r"gen(\d+)", path.stem) or re.search(r"(\d+)", path.stem)
+    return (int(m.group(1)) if m else -1, path.name)
+
+
 def extract_head_and_svf(run_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     """Extract head weights + SVF scales from best_theta.npy via θ unpack."""
     from trinity.coordinator import params as P
@@ -129,10 +143,13 @@ def extract_head_and_svf(run_dir: Path) -> tuple[np.ndarray, np.ndarray]:
 
     theta_path = run_dir / "best_theta.npy"
     if not theta_path.exists():
-        candidates = sorted(run_dir.glob("best_theta*"))
+        candidates = list(run_dir.glob("best_theta*"))
         if not candidates:
             raise FileNotFoundError(f"No best_theta found in {run_dir}")
-        theta_path = candidates[-1]
+        # Pick the numerically-latest generation, not the lexicographically-last name:
+        # sorted(...)[-1] returns 'best_theta_gen9' over 'best_theta_gen11', packing an
+        # OLDER generation's weights into the submission.
+        theta_path = max(candidates, key=_theta_generation)
 
     theta = np.load(str(theta_path))
     head_W, svf_scales = P.unpack(theta, spec)
