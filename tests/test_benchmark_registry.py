@@ -19,6 +19,7 @@ from trinity.adapters import (
     register_adapter,
     register_builtin_adapters,
     register_livecodebench_v6_adapter,
+    register_bbh_adapter,
     register_mmlu_pro_adapter,
     register_swebench_adapter,
 )
@@ -228,6 +229,7 @@ def test_decorator_registration_and_registry_isolation():
         register_builtin_adapters()
         register_livecodebench_v6_adapter()
         register_swebench_adapter()
+        register_bbh_adapter()
         register_mmlu_pro_adapter()
 
     assert set(SUPPORTED_BENCHMARKS) | {"livecodebench_v6"} <= set(available_adapters())
