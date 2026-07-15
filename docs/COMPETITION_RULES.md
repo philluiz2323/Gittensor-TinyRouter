@@ -70,7 +70,7 @@ General-improvement PRs (bug fixes, new adapters, docs) are welcome but
 | Behavior | Consequence |
 |---|---|
 | Copying another miner's head (cosine ≥ 0.999) | Gate 3 rejects |
-| Fabricating a training receipt | Gate 4 rejects (fitness curve must be plausible) |
+| Fabricating a training receipt | Gate 4 rejects (cost must be > $0 with ≥ 1 fitness entry) |
 | Forging cost in the ledger | Gate 5 rejects (hash-chain verification) |
 | Overfitting to the hidden eval (eval−audit gap > 0.10) | Gate 5 hard-rejects |
 | Submitting more than once per week | Gate 1 rejects |
@@ -113,18 +113,15 @@ else:
 
 ---
 
-## The 8 anti-cheat gates
+## The 5 evaluation gates
 
-| # | Gate | When | Cost |
+| # | Gate | When | What it catches |
 |---|---|---|---|
-| 1 | Rate limit (1/week) | Pre-eval | $0 |
-| 2 | Weight validation (shape, NaN, norm) | Pre-eval | $0 |
-| 3 | Duplicate detection (cosine < 0.999) | Pre-eval | $0 |
-| 4 | Receipt plausibility (cost ≥ $15, fitness curve) | Pre-eval | $0 |
-| 5 | Ledger/receipt cost consistency | Pre-eval | $0 |
-| 6 | Schema/benchmark validation | Pre-eval | $0 |
-| 7 | Theta pack/unpack integrity | Pre-eval | $0 |
-| 8 | Overfit rejection (eval−audit gap) | Post-eval | GPU + API |
+| 1 | Rate limit (1/week) | Pre-eval | Submission flooding |
+| 2 | Weight sanity (shape, NaN/Inf, not all-zeros) | Pre-eval | Garbage submissions |
+| 3 | Duplicate detection (cosine < 0.99) | Pre-eval | Copied heads |
+| 4 | Receipt exists (cost > 0, ≥ 1 fitness entry) | Pre-eval | No training evidence |
+| 5 | Overfit rejection (eval−audit gap > 0.15) | Post-eval | Overfitting to hidden set |
 
 ---
 

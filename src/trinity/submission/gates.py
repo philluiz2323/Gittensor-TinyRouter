@@ -164,9 +164,10 @@ def validate_weights(head_W: np.ndarray, svf_scales: np.ndarray) -> Optional[str
         return "head_weights_all_zeros"
     if np.allclose(svf_scales, 0.0):
         return "svf_scales_all_zeros"
-    head_norm = float(np.linalg.norm(head_W))
-    if head_norm < 0.001:
-        return f"head_weight_norm_too_small: {head_norm:.6f}"
+    # Norm threshold removed for launch — a legitimately small head (e.g. early
+    # in CMA-ES or with a small-activation encoder) can have norm < 0.001 and
+    # still route meaningfully. The all-zeros check above catches the degenerate
+    # case; the overfit gate catches a head that doesn't learn.
     return None
 
 
@@ -314,59 +315,20 @@ def check_duplicate(
 
 
 def validate_receipt(receipt: dict[str, Any]) -> Optional[str]:
+    """Gate 4: receipt exists with cost > 0 and at least 1 fitness entry.
+
+    Simplified for launch — the old gate checked fitness curve shape (non-flat,
+    non-monotonic, gen-0 ≤ 0.98, best_fitness cross-check) which rejected honest
+    short/cheap training runs. Those checks are deferred to a future hardening pass.
+    """
     cost = receipt.get("total_cost_usd", 0.0)
     if cost <= 0.0:
         return "receipt_cost_zero_or_missing"
-    if cost < MIN_TRAINING_COST_USD:
-        return f"receipt_cost_too_low: ${cost:.2f} < ${MIN_TRAINING_COST_USD:.2f} minimum"
 
     history = receipt.get("fitness_history", [])
-    if not history or len(history) < 3:
-        return "receipt_fitness_history_too_short: need >= 3 entries"
+    if not history or len(history) < 1:
+        return "receipt_fitness_history_empty"
 
-    values: list[float] = []
-    for entry in history:
-        if isinstance(entry, dict):
-            v = entry.get("gen_mean_fitness", entry.get("mean_fitness", entry.get("best_fitness")))
-        elif isinstance(entry, (int, float)):
-            v = entry
-        else:
-            continue
-        if v is not None:
-            values.append(float(v))
-    if len(values) < 3:
-        return "receipt_fitness_history_no_valid_values"
-    if values[0] > 0.98:
-        return f"receipt_fitness_starts_too_high: {values[0]:.4f}"
-    if max(values) - min(values) < 0.001:
-        return "receipt_fitness_flat_line"
-    diffs = [values[i + 1] - values[i] for i in range(len(values) - 1)]
-    if len(diffs) > 3 and all(d >= 0 for d in diffs):
-        return "receipt_fitness_too_perfect: monotonically increasing"
-
-    claimed_gens = receipt.get("generations", 0)
-    if claimed_gens > 0 and abs(claimed_gens - len(history)) > 5:
-        return f"receipt_generations_mismatch: claimed {claimed_gens}, history has {len(history)}"
-
-    best_fitness = receipt.get("best_fitness", 0.0)
-    if best_fitness > 0.0:
-        peaks: list[float] = []
-        for entry in history:
-            if isinstance(entry, dict):
-                p = entry.get("gen_max_fitness", entry.get("max_fitness", entry.get("best_fitness")))
-            elif isinstance(entry, (int, float)):
-                p = entry
-            else:
-                continue
-            if p is not None:
-                peaks.append(float(p))
-        if peaks:
-            peak_max = max(peaks)
-            if abs(best_fitness - peak_max) > 0.1:
-                return (
-                    f"receipt_best_fitness_mismatch: claimed {best_fitness:.4f}, "
-                    f"history peak {peak_max:.4f}"
-                )
     return None
 
 

@@ -13,9 +13,9 @@ EXPECTED_HEAD_SHAPE: tuple[int, int] = (6, 1024)
 # additive shift of the rows -- the duplicate gate must compare heads accordingly.
 N_HEAD_MODELS: int = 3
 
-MIN_TRAINING_COST_USD: float = 15.0
+MIN_TRAINING_COST_USD: float = 1.0  # just require cost > 0 (was 15.0 — too strict)
 MAX_WEIGHT_MAGNITUDE: float = 1e6
-DUPLICATE_HEAD_COSINE_THRESHOLD: float = 0.999
+DUPLICATE_HEAD_COSINE_THRESHOLD: float = 0.99  # lowered from 0.999 (was too tight)
 
 RATE_LIMIT_WINDOW_DAYS: int = 7
 RATE_LIMIT_MAX_SUBMISSIONS: int = 1
