@@ -29,7 +29,13 @@ def load_rows(root: str = "experiments") -> list[dict]:
         singles = {k.split("::", 1)[1]: v for k, v in r.items() if k.startswith("single::")}
         if not singles or "TRINITY" not in r:
             continue
-        best_model = max(singles, key=singles.get)
+        # best_model over the NON-NULL single scores only: a partial/older eval*.json can
+        # carry `"single::x": null`, and `max(singles, key=singles.get)` crashes comparing
+        # None to a float. The multi-task summary (`single_avg`) already filters nulls, so
+        # keep the full `singles` map and just guard the per-row best here.
+        numeric = {m: v for m, v in singles.items()
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        best_model = max(numeric, key=lambda m: numeric[m]) if numeric else None
         rows.append({
             "file": p,
             "benchmark": d.get("benchmark", "?"),
@@ -37,7 +43,7 @@ def load_rows(root: str = "experiments") -> list[dict]:
             "variant": Path(p).stem,  # eval / eval_fixed / *_rigorous
             "trinity": r.get("TRINITY"),
             "random": r.get("random_routing"),
-            "best_single": singles[best_model],
+            "best_single": numeric[best_model] if best_model is not None else None,
             "best_model": best_model,
             "singles": singles,
         })
@@ -72,7 +78,7 @@ def render(rows: list[dict]) -> str:
         gt_best = "✅" if (r["trinity"] or 0) > (r["best_single"] or 0) else ("≈" if abs((r["trinity"] or 0) - (r["best_single"] or 0)) <= 0.03 else "❌")
         gt_rand = "✅" if (r["trinity"] or 0) > (r["random"] or 0) else "❌"
         out.append(f"| {r['benchmark']} | {r['coordinator']} | {r['variant']} | "
-                   f"{fmt(r['trinity'])} | {fmt(r['best_single'])} ({r['best_model']}) | "
+                   f"{fmt(r['trinity'])} | {fmt(r['best_single'])} ({r['best_model'] or '—'}) | "
                    f"{fmt(r['random'])} | {gt_best} | {gt_rand} |")
 
     # Multi-task summary: best TRINITY per benchmark, and best fixed single model averaged.

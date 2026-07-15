@@ -220,3 +220,32 @@ def test_json_output_default_root_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["results_table.py", "--json"])
     rt.main()
     assert (tmp_path / "experiments" / "results.json").exists()
+
+
+# --------------------------------------------------------------------------- #
+# load_rows must tolerate a null single:: score (partial/older eval*.json).
+# max(singles, key=singles.get) used to crash comparing None to a float.
+# --------------------------------------------------------------------------- #
+def _write_results(path: Path, results: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"benchmark": "math500", "results": results}))
+
+
+def test_load_rows_skips_null_single_and_does_not_crash(tmp_path):
+    _write_results(tmp_path / "coordA" / "eval_math500.json",
+                   {"TRINITY": 0.6, "random_routing": 0.1,
+                    "single::deepseek": 0.5, "single::glm": None})
+    rows = rt.load_rows(str(tmp_path))            # used to raise TypeError
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["best_model"] == "deepseek" and row["best_single"] == 0.5   # null glm ignored
+    assert row["singles"] == {"deepseek": 0.5, "glm": None}                # full map kept
+
+
+def test_load_rows_all_null_singles_yields_none_best(tmp_path):
+    _write_results(tmp_path / "coordA" / "eval_math500.json",
+                   {"TRINITY": 0.6, "single::glm": None})
+    rows = rt.load_rows(str(tmp_path))
+    assert rows[0]["best_model"] is None and rows[0]["best_single"] is None
+    md = rt.render(rows)                          # render must not crash on the null row
+    assert "TRINITY" in md and "(—)" in md        # best-model placeholder, not "(None)"
