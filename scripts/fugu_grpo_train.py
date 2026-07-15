@@ -68,8 +68,8 @@ class StubPool:
     """No-spend worker pool for CUDA/backend smoke tests."""
 
     models = {
-        "qwen3.5-35b-a3b": "stub/qwen3.5-35b-a3b",
-        "minimax-m3": "stub/minimax-m3",
+        "qwen3.5": "stub/qwen3.5",
+        "gemini-flash-lite": "stub/gemini-flash-lite",
         "deepseek-v4-flash": "stub/deepseek-v4-flash",
     }
 

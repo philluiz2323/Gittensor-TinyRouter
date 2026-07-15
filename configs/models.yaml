@@ -24,10 +24,10 @@ openrouter:
   provider: {}
 
 pool:
-  - name: qwen3.5-35b-a3b
+  - name: qwen3.5
     id: "qwen/qwen3.5-35b-a3b"
-  - name: minimax-m3
-    id: "minimax/minimax-m3"
+  - name: gemini-flash-lite
+    id: "google/gemini-flash-lite"
   - name: deepseek-v4-flash
     id: "deepseek/deepseek-v4-flash"
 

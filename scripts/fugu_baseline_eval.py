@@ -2,7 +2,7 @@
 """Prompted-baseline evaluation of the Fugu Conductor over the OpenRouter pool.
 
 ZERO training: a :class:`PromptedConductor` (an OpenRouter model) emits the
-workflow, the pool (qwen3.5-35b-a3b / minimax-m3 / deepseek-v4-flash) executes it, and we
+workflow, the pool (qwen3.5 / gemini-flash-lite / deepseek-v4-flash) executes it, and we
 report PURE-binary accuracy + parse rate + EXACT API cost. The per-query 0/1 it
 writes feeds ``scripts/oracle_ceiling.py --analyze --trinity-per-query`` so the
 Conductor can be compared against best-single and the routing ceiling on the

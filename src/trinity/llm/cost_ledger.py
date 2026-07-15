@@ -60,7 +60,7 @@ def ledger_payload(model: str, prompt_tokens: int, completion_tokens: int) -> st
     """Return the canonical pre-hash payload for one ledger entry.
 
     Args:
-        model: Short model slug (e.g. ``qwen3.5-35b-a3b``).
+        model: Short model slug (e.g. ``qwen3.5``).
         prompt_tokens: Prompt token count from the API response.
         completion_tokens: Completion token count from the API response.
 

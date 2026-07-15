@@ -70,15 +70,15 @@ def test_evaluate_cached_uses_policy_svf():
             "question_text": "ab",
             "benchmark": "math500",
             "correct_answer": "42",
-            "model_answers": {"qwen3.5-35b-a3b": "wrong", "minimax-m3": "\\boxed{42}"},
+            "model_answers": {"qwen3.5": "wrong", "gemini-flash-lite": "\\boxed{42}"},
         },
         {
             "question_text": "abc",
             "benchmark": "math500",
             "correct_answer": "7",
-            "model_answers": {"qwen3.5-35b-a3b": "\\boxed{7}", "minimax-m3": "wrong"},
+            "model_answers": {"qwen3.5": "\\boxed{7}", "gemini-flash-lite": "wrong"},
         },
     ]
-    acc = _evaluate_cached(policy, items, ["qwen3.5-35b-a3b", "minimax-m3", "deepseek-v4-flash"])
+    acc = _evaluate_cached(policy, items, ["qwen3.5", "gemini-flash-lite", "deepseek-v4-flash"])
     assert acc == 1.0
     assert policy.calls == 2

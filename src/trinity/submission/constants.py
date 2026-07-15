@@ -30,7 +30,7 @@ WIN_MARGIN: float = 0.02  # 2 percentage points — above the n=120 eval noise b
 LEDGER_RECEIPT_COST_TOLERANCE_USD: float = 0.05
 
 DEFAULT_POOL_MODELS: tuple[str, ...] = (
-    "qwen3.5-35b-a3b",
-    "minimax-m3",
+    "qwen3.5",
+    "gemini-flash-lite",
     "deepseek-v4-flash",
 )

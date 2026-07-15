@@ -591,8 +591,8 @@ class _CostMeter:
 
 # OpenRouter list prices for the default pool: $/1M (in, out).
 _DEFAULT_PRICES = {
-    "qwen3.5-35b-a3b": (0.14, 1.00),
-    "minimax-m3": (0.30, 1.20),
+    "qwen3.5": (0.14, 1.00),
+    "gemini-flash-lite": (0.075, 0.30),
     "deepseek-v4-flash": (0.09, 0.18),
 }
 
