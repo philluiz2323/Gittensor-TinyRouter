@@ -1120,8 +1120,20 @@ def _run_functional_test(
     Arguments and the expected return are parsed on the parent side and embedded
     into the child script as Python literals (so the child never re-parses raw
     text). The child resolves ``fn_name`` as a top-level function or a
-    ``Solution`` method, calls it with the parsed arguments, and asserts the
-    return equals the expected value; the process exits ``0`` iff it matches.
+    ``Solution`` method, calls it with the parsed arguments, and compares the
+    return to the expected value with :func:`_eq` (a tolerant structural equality,
+    embedded in the child since it runs as a separate process); the process exits
+    ``0`` iff it matches.
+
+    ``_eq`` mirrors the math path's float bridging (``math_equal`` uses
+    ``abs_tol=1e-6``): a float return equals the expected value within an absolute
+    tolerance, so representation drift (e.g. ``2.5000000001`` vs ``2.5``) on a
+    LiveCodeBench problem whose answer is a float is not a false negative, while
+    genuinely different values (``2.6`` vs ``2.5``) still fail. It recurses through
+    ``list``/``tuple`` element-wise so ordered-sequence answers compare by value
+    regardless of which sequence type the solution returns (``(0, 1)`` vs the JSON
+    ``[0, 1]``). A ``bool`` guard keeps ``True``/``False`` from numerically bridging
+    to ``1``/``0``; everything else falls back to plain ``==``.
     """
     args = _parse_functional_args(raw_input)
     expected = _parse_functional_value(raw_expected)
@@ -1129,6 +1141,14 @@ def _run_functional_test(
         f"\n\n_args = {args!r}\n"
         f"_expected = {expected!r}\n"
         f"_name = {str(fn_name)!r}\n"
+        "def _eq(a, b, _tol=1e-6):\n"
+        "    if isinstance(a, bool) or isinstance(b, bool):\n"
+        "        return a is b\n"
+        "    if isinstance(a, (int, float)) and isinstance(b, (int, float)):\n"
+        "        return abs(a - b) <= _tol\n"
+        "    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):\n"
+        "        return len(a) == len(b) and all(_eq(x, y, _tol) for x, y in zip(a, b))\n"
+        "    return a == b\n"
         "if _name in globals() and callable(globals()[_name]):\n"
         "    _fn = globals()[_name]\n"
         "elif 'Solution' in globals() and hasattr(Solution, _name):\n"
@@ -1136,7 +1156,7 @@ def _run_functional_test(
         "else:\n"
         "    raise SystemExit('functional entry point not found: ' + _name)\n"
         "_got = _fn(*_args)\n"
-        "assert _got == _expected, 'got %r, expected %r' % (_got, _expected)\n"
+        "assert _eq(_got, _expected), 'got %r, expected %r' % (_got, _expected)\n"
     )
     return _exec_script(code + harness, stdin_data="", timeout_s=timeout_s)
 
