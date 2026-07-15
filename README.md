@@ -1,246 +1,102 @@
-<img src="Gittensor-TinyRouter.png" alt="TinyRouter — Evolved LLM Coordinator" width="100%">
+<img src="Gittensor-TinyRouter.png" alt="TinyRouter" width="100%">
 
 # TinyRouter
 
-Multi-benchmark routing competition for SN74 on Gittensor.
+**The incentivized open benchmark for LLM routing intelligence.**
 
-[![Website](https://img.shields.io/badge/website-tinyrouter.ai-blue)](https://james-cuda.github.io/Gittensor-TinyRouter/)
+Train a tiny routing head (13,312 params) that decides — for every query —
+which model to call and what role it plays. Beat the current king across three
+benchmarks and earn TAO via [Gittensor](https://github.com/entrius/gittensor) SN74.
+
 [![Gittensor](https://img.shields.io/badge/Gittensor-SN74-orange)](https://github.com/entrius/gittensor)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CI](https://github.com/James-CUDA/Gittensor-TinyRouter/actions/workflows/ci.yml/badge.svg)](https://github.com/James-CUDA/Gittensor-TinyRouter/actions)
 
-TinyRouter is a learned orchestration benchmark and miner competition built around a simple question:
+## Quick start
 
-**Can a small coordinator route better than any fixed model across software engineering, coding, and reasoning tasks?**
+```bash
+git clone https://github.com/James-CUDA/Gittensor-TinyRouter.git
+cd Gittensor-TinyRouter && pip install -e ".[dev]"
+export OPENROUTER_API_KEY=sk-or-v1-...
 
-Built for SN74 on Gittensor. Contributors submit PRs that improve the live routing frontier. The evaluation loop verifies correctness on frozen benchmark slices, scores the verified marginal gain, and rewards merged improvements.
+# Train one head across all three benchmarks
+CUDA_VISIBLE_DEVICES=0 python -m trinity.train \
+    --benchmarks math500,mmlu,livecodebench --run-name my-head
 
-**Quick links:** [Website](https://james-cuda.github.io/Gittensor-TinyRouter/) ·
-[Leaderboard](leaderboard.json) · [Submission Guide](SUBMITTING.md) ·
-[Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md) · [Glossary](docs/GLOSSARY.md)
-
-## Current Competition
-
-The current tracked benchmark suite is:
-
-- SWE-bench Verified
-- LiveCodeBench v6
-- MMLU-Pro
-
-The current model pool is:
-
-- Qwen3.5-35B-A3B
-- MiniMax M3
-- DeepSeek V4 Flash
-
-The competition target is a **single shared head** that routes across all three benchmarks under one frozen protocol.
-
-## What TinyRouter Is
-
-TinyRouter is a lightweight multi-turn coordinator inspired by TRINITY.
-
-For each task, the coordinator chooses:
-
-- which model to call
-- which role it should play
-
-Roles:
-
-- Thinker
-- Worker
-- Verifier
-
-The coordinator itself is intentionally small. It does not solve the task directly. It only learns delegation.
-
-The long-term system has two stages:
-
-1. **TRINITY stage**  
-   A frozen encoder plus a small routing head trained with separable CMA-ES.
-
-2. **Conductor stage**  
-   A larger orchestration policy that generates workflows, subtasks, and context-sharing structure.
-
-## Why SN74
-
-SN74 rewards real, reproducible improvements on shipped open-source code and evaluation infrastructure.
-
-TinyRouter follows the same spirit:
-
-- source-required improvements
-- frozen benchmark protocol
-- deterministic evaluation rules
-- hidden eval and audit sets
-- manual merge after review
-- rewards tied to verified marginal gain, not claims in a PR description
-
-## How The Competition Works
-
-The loop is intentionally tight:
-
-1. Pick a narrow improvement target in routing, evaluation, or orchestration.
-2. Submit a PR with source changes.
-3. The evaluator runs the PR against the frozen benchmark protocol.
-4. The system verifies correctness first.
-5. If the PR improves the live frontier, it gets a score label.
-6. Maintainers merge the best verified frontier improvements.
-
-This keeps rewards tied to measurable benchmark gains on the live codebase.
-
-## Benchmark Protocol
-
-TinyRouter uses a **frozen composite benchmark**, not raw public leaderboard scoring.
-
-For each benchmark we freeze:
-
-- dataset revision / commit
-- exact sampled task IDs
-- harness version
-- decode settings
-- scoring rules
-- random seed
-
-### Current Evaluation Shape
-
-Per benchmark:
-
-- hidden eval set: `n = 100–120`
-- optional hidden audit set: separate from eval
-
-Benchmarks are weighted equally in the final composite score.
-
-### Current Benchmarks
-
-- `SWE-bench Verified`  
-  repository-grounded patch generation and validation
-- `LiveCodeBench v6`  
-  code generation under a fixed evaluation harness
-- `MMLU-Pro`  
-  multiple-choice reasoning and knowledge
-
-This is a router benchmark built on top of these tasks. It is not a direct replacement for each benchmark's official public leaderboard.
-
-## Scoring
-
-Scoring is **verified benchmark improvement only**.
-
-A PR can improve:
-
-- average composite score
-- one benchmark score, if the composite frontier improves
-- later, cost-adjusted or latency-adjusted routing efficiency
-
-Non-frontier changes are welcome but score `0` unless they produce a verified improvement under the frozen evaluator.
-
-### Proposed Labels
-
-- `eval:XL`
-- `eval:L`
-- `eval:M`
-- `eval:S`
-- `eval:XS`
-- `eval:none`
-- `eval:REJECT`
-- `eval:BASELINE`
-
-Suggested meaning:
-
-- `BASELINE`  
-  first verified frontier entry
-- `XS` to `XL`  
-  verified gain over the live frontier
-- `none`  
-  correct, but no meaningful improvement
-- `REJECT`  
-  failed correctness, violated protocol, or regressed the frontier
-
-Exact score thresholds should live in the evaluator config, not the README.
-
-## Current Training Path
-
-### Stage 1: TRINITY Head
-
-Train a shared routing head across all three benchmarks.
-
-Planned hardware:
-
-- RTX 5090
-
-Method:
-
-- frozen encoder
-- lightweight head
-- multi-turn routing
-- Thinker / Worker / Verifier roles
-- separable CMA-ES
-
-### Stage 2: Conductor
-
-Train a workflow-generating orchestrator after the routing baseline is stable.
-
-Planned hardware:
-
-- H100
-
-Method:
-
-- learned subtask decomposition
-- worker assignment
-- context / access graph
-- verification and refinement
-- recursive orchestration later if justified
-
-## Miner Guide
-
-If you are contributing for SN74-style rewards, your PR should target one of these categories:
-
-- routing quality
-- benchmark adapter correctness
-- evaluation harness reliability
-- cost / latency measurement
-- conductor workflow quality
-- reproducibility and anti-cheat hardening
-
-A valid submission should include:
-
-- source changes only
-- reproducible config
-- exact claimed benchmark target
-- no hidden protocol changes
-- no dataset substitution
-- no benchmark-specific cheating
-- no prompt hardcoding to sampled hidden IDs
-
-Recommended submission artifacts:
-
-- routing head artifact
-- config receipt
-- cost ledger
-- commit hash
-- run summary
-
-## Evaluation Rules
-
-The evaluator should check:
-
-- correct artifact format
-- correct parameter shape
-- allowed model pool only
-- frozen dataset manifest
-- frozen harness version
-- no protocol drift
-- benchmark correctness before scoring
-- hidden eval score
-- hidden audit score
-
-The evaluator does not auto-merge. Merge remains manual after review.
-
-## Layout
-
-```text
-configs/       benchmark, model-pool, and evaluator configs
-benchmarks/    dataset adapters and harness glue
-src/           coordinator, conductor, training, eval
-scripts/       training, evaluation, packaging, leaderboard tools
-docs/          protocol, roadmap, results, scoring rules
-tests/         offline and harness tests
-experiments/   local run outputs
+# Pack and submit
+python scripts/pack_submission.py \
+    --run-dir experiments/composite/my-head --miner-name your-name --benchmark composite
 ```
+
+→ Full walkthrough: [`docs/REPRODUCTION_GUIDE.md`](docs/REPRODUCTION_GUIDE.md)
+
+## How it works
+
+```
+Query → Qwen3-0.6B encoder (frozen) → 13K-param head → (model, role) decision
+```
+
+The head picks one of three models and one of three roles (Thinker / Worker /
+Verifier) per turn. It's trained derivative-free via separable CMA-ES against a
+binary correct/wrong reward. The head never solves the task — it only learns
+**who to ask**.
+
+## Benchmarks
+
+| Benchmark | Tests |
+|---|---|
+| **math500** | Math reasoning |
+| **mmlu** | Domain knowledge |
+| **livecodebench** | Code generation |
+
+One head routes across all three. The composite score = mean of per-benchmark
+scores. A new king must beat the previous king by **≥ 0.02** (2 percentage points).
+
+## Model pool (same for all miners)
+
+| Model | Provider |
+|---|---|
+| `qwen3.5-35b-a3b` | OpenRouter |
+| `minimax-m3` | OpenRouter |
+| `deepseek-v4-flash` | OpenRouter |
+
+## Documentation
+
+| Doc | What |
+|---|---|
+| [`SUBMITTING.md`](SUBMITTING.md) | How to submit a routing head |
+| [`docs/COMPETITION_RULES.md`](docs/COMPETITION_RULES.md) | Rules, frozen files, cheating criteria |
+| [`docs/EVALUATION_PIPELINE.md`](docs/EVALUATION_PIPELINE.md) | How scoring works (every stage) |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Repo structure + design principles |
+| [`docs/REPRODUCTION_GUIDE.md`](docs/REPRODUCTION_GUIDE.md) | End-to-step walkthrough |
+| [`leaderboard.json`](leaderboard.json) | Current king + history |
+
+## Baselines (what to beat)
+
+```bash
+python baselines/always_model.py --model qwen3.5-35b-a3b --benchmark math500
+python baselines/random_router.py --benchmark math500 --seeds 100
+```
+
+## Repository
+
+```
+src/trinity/coordinator/    routing engine (encoder, head, SVF, policy)
+src/trinity/adapters/       benchmark adapters (9 benchmarks)
+src/trinity/submission/     competition gates + leaderboard
+src/trinity/orchestration/  session loop + shared grader
+src/trinity/optim/          CMA-ES trainer + fitness
+src/trinity/llm/            OpenRouter client + cost ledger
+baselines/                  reference baselines
+scripts/                    pr_eval, build_benchmark, pack_submission, ...
+docs/                       competition + architecture docs
+tests/                      200+ offline tests
+```
+
+## Research basis
+
+Built on TRINITY (Xu et al., ICLR 2026, [arXiv:2512.04695](https://arxiv.org/abs/2512.04695)).
+Research results: [`docs/RESULTS.md`](docs/RESULTS.md) · Lab notebook: [`docs/JOURNAL.md`](docs/JOURNAL.md)
+
+## License
+
+MIT
