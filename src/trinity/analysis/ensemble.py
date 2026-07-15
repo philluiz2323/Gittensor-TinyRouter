@@ -35,7 +35,7 @@ def answers_agree(benchmark: str, a: str, b: str) -> bool:
     """
     from trinity.orchestration import reward as _reward
 
-    key = (benchmark or "").strip().lower()
+    key = _reward.resolve_benchmark(benchmark)
     if key in _reward.CHOICE_BENCHMARKS:
         la = _reward.extract_choice_letter(a)
         return la is not None and la == _reward.extract_choice_letter(b)
