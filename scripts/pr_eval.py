@@ -45,12 +45,15 @@ from trinity.submission.constants import (
     WIN_MARGIN,
 )
 from trinity.submission.gates import (
+    audit_head_routing_diversity,
+    audit_ledger_call_volume,
     check_duplicate as _check_duplicate,
     check_rate_limit as _check_rate_limit,
     cosine_similarity as _cosine_similarity,
     parse_utc_timestamp as _parse_utc_timestamp,
     rate_limit_entries as _rate_limit_entries,
     routing_invariant_head as _routing_invariant_head,
+    validate_fitness_history_sequence,
     validate_ledger_receipt_cost,
     validate_pack_schema,
     validate_receipt as _validate_receipt,
@@ -535,6 +538,19 @@ async def evaluate_pr(pr_number: int, benchmark: str,
         return _reject(err)
 
     print("[pr_eval] All 4 pre-eval gates passed ✓\n")
+
+    # Advisories (issue #208): report-only signals that NEVER reject. The gate chain was
+    # deliberately relaxed for launch (4bb03a7) "to attract miners, not repel them", so
+    # these only inform: a fabricated fitness curve is worth flagging but not blocking, the
+    # ledger is not run-scoped, and a collapsed router is a valid (if weak) submission
+    # under the score-based contract.
+    for _name, _warn in (
+        ("fitness_history_sequence", validate_fitness_history_sequence(receipt)),
+        ("ledger_call_volume", audit_ledger_call_volume(receipt, ledger_path)),
+        ("head_routing_diversity", audit_head_routing_diversity(head_W)),
+    ):
+        if _warn:
+            print(f"[pr_eval] [WARN] {_name}: {_warn}")
 
     # ══════════════════════════════════════════════════════════════
     # Load encoder ONCE (shared across all benchmarks)

@@ -93,6 +93,15 @@ python scripts/preflight_submission.py \
     --benchmark composite
 ```
 
+**Advisories (`[WARN]`, never blocking).** Preflight and `pr_eval` also print report-only
+signals. They **cannot fail your submission** — they only tell you something worth a look:
+
+| Advisory | Warns when | Why it never blocks |
+|---|---|---|
+| `ledger_call_volume` | the ledger holds far fewer rows than `generations × popsize`, or only one model | ledger entries carry no run identifier, so a shared ledger's unrelated traffic can satisfy any threshold — it needs run-scoped provenance before it could reject |
+| `head_routing_diversity` | the agent logit rows are effectively equal, so the head routes to one model for every query | the contract is score-based: a collapsed router is strategically weak but **valid** if it scores better |
+| `fitness_history_sequence` | your `receipt.json` curve is internally inconsistent — a `generation` logged twice/out of order/with gaps, a row whose `mean_fitness` exceeds its own `max_fitness`, or a `best_fitness` that decreases | the gate chain is deliberately launch-friendly; this flags a likely-fabricated curve without blocking you |
+
 ## Step 3: Submit
 
 1. **Fork** this repo and create a branch: `git checkout -b submission/your-name-gen1`

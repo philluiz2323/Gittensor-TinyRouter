@@ -9,6 +9,7 @@ from typing import Any
 from trinity.submission.gates import (
     GateResult,
     PreflightContext,
+    run_offline_advisories,
     run_offline_gates,
 )
 from trinity.submission.pack import SubmissionPack, load_submission_pack
@@ -23,9 +24,14 @@ class PreflightReport:
     pack: SubmissionPack
     benchmark: str
     results: list[GateResult] = field(default_factory=list)
+    #: Advisory findings (issue #208). Reported as ``[WARN]`` and deliberately EXCLUDED
+    #: from :attr:`passed` — neither is a sound rejection criterion, so a fired advisory
+    #: must never block a submission.
+    advisories: list[GateResult] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
+        # Advisories are intentionally not consulted: they inform, they never reject.
         return bool(self.results) and all(r.ok for r in self.results)
 
     @property
@@ -43,8 +49,13 @@ class PreflightReport:
             status = "PASS" if result.ok else "FAIL"
             detail = "" if result.ok else f" — {result.reason}"
             lines.append(f"  [{status}] {result.gate}{detail}")
+        for advisory in self.advisories:
+            if advisory.failed:
+                lines.append(f"  [WARN] {advisory.gate} — {advisory.reason}")
         if self.passed:
-            lines.append("All offline gates passed.")
+            fired = sum(1 for a in self.advisories if a.failed)
+            note = f" ({fired} advisory warning(s) — informational, not blocking)" if fired else ""
+            lines.append(f"All offline gates passed.{note}")
         return lines
 
 
@@ -94,7 +105,9 @@ class PreflightRunner:
         # Local preflight surfaces ALL problems at once (a miner fixes their
         # submission before opening a PR); pr_eval's scoring path stays fail-fast.
         results = run_offline_gates(pack, ctx, collect_all=True)
-        return PreflightReport(pack=pack, benchmark=self.benchmark, results=results)
+        advisories = run_offline_advisories(pack, ctx)
+        return PreflightReport(pack=pack, benchmark=self.benchmark, results=results,
+                               advisories=advisories)
 
 
 def load_leaderboard_json(repo_root: Path) -> dict[str, Any]:
