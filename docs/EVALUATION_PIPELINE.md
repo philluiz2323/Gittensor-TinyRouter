@@ -10,10 +10,10 @@
       │
       ▼
   ┌──────────────────────────┐
-  │  1. PRE-EVAL GATES (7)   │  offline, zero GPU/API cost
+  │  1. PRE-EVAL GATES (4)   │  offline, zero GPU/API cost
   │  rate limit, weights,    │
-  │  duplicate, receipt,     │
-  │  ledger, schema, theta   │
+  │  duplicate, receipt      │
+  │  (bot runs these auto)   │
   └──────────┬───────────────┘
              │ all gates pass
              ▼
@@ -50,21 +50,19 @@
 
 ## Stage 1: Pre-Evaluation Gates (offline)
 
-Before any GPU or API work, 7 gates run on the submission. A failing gate
-rejects immediately at zero cost.
+Before any GPU or API work, 4 gates run on the submission. These are
+**automated by the submission bot** (`.github/workflows/submission-check.yml`)
+within ~1 minute of the PR opening. A failing gate auto-closes the PR.
 
 | Gate | What it checks | Source |
 |---|---|---|
 | **1. Rate limit** | ≤ 1 submission per miner per 24 hours | `submission/gates.py:check_rate_limit` |
-| **2. Weight validation** | Head shape `(6, 1024)`, SVF shape `(7168,)`, no NaN/Inf, norm > 0.001 | `submission/gates.py:validate_weights` |
-| **3. Duplicate detection** | Cosine similarity < 0.999 vs all prior submissions + current king | `submission/gates.py:check_duplicate` |
-| **4. Receipt plausibility** | Cost ≥ $15, ≥ 3 fitness entries, gen-0 fitness ≤ 0.98, non-flat, non-monotonic, `best_fitness` matches history peaks | `submission/gates.py:validate_receipt` |
-| **5. Ledger consistency** | Receipt cost matches verified hash-chain ledger (±$0.05) | `submission/gates.py:validate_ledger_receipt_cost` |
-| **6. Schema validation** | Receipt benchmark field matches expected, pool models correct | `submission/schema.py:validate_pack_schema` |
-| **7. Theta integrity** | Head + SVF pack/unpack round-trip matches submitted shapes | `submission/schema.py:validate_theta_integrity` |
+| **2. Weight sanity** | Head shape `(6, 1024)`, SVF shape `(7168,)`, no NaN/Inf, not all-zeros | `submission/gates.py:validate_weights` |
+| **3. Duplicate detection** | Cosine similarity < 0.99 vs all prior submissions + current king | `submission/gates.py:check_duplicate` |
+| **4. Receipt exists** | Cost > $0 and ≥ 1 fitness entry in the receipt | `submission/gates.py:validate_receipt` |
 
 **Gate 5 (overfit rejection)** runs AFTER evaluation, not before: the eval−audit
-accuracy gap must be ≤ 0.10 (hard reject) or ≤ 0.05 (0.85× penalty).
+accuracy gap must be ≤ 0.15 (hard reject) or ≤ 0.08 (0.85× penalty).
 
 ---
 
