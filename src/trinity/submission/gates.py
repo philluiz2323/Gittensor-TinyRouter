@@ -315,19 +315,18 @@ def check_duplicate(
 
 
 def validate_receipt(receipt: dict[str, Any]) -> Optional[str]:
-    """Gate 4: receipt exists with cost > 0 and at least 1 fitness entry.
+    """Gate 4: receipt proves real training happened.
 
-    Simplified for launch — the old gate checked fitness curve shape (non-flat,
-    non-monotonic, gen-0 ≤ 0.98, best_fitness cross-check) which rejected honest
-    short/cheap training runs. Those checks are deferred to a future hardening pass.
+    Requires cost > 0 and more than 2 fitness entries (>= 3 generations) so a
+    miner cannot submit an essentially untrained head after 1-2 generations.
     """
     cost = receipt.get("total_cost_usd", 0.0)
     if cost <= 0.0:
         return "receipt_cost_zero_or_missing"
 
     history = receipt.get("fitness_history", [])
-    if not history or len(history) < 1:
-        return "receipt_fitness_history_empty"
+    if not history or len(history) < 3:
+        return "receipt_fitness_history_too_short: need > 2 entries (>= 3 generations)"
 
     return None
 
