@@ -20,6 +20,12 @@ DUPLICATE_HEAD_COSINE_THRESHOLD: float = 0.999
 RATE_LIMIT_WINDOW_DAYS: int = 7
 RATE_LIMIT_MAX_SUBMISSIONS: int = 1
 
+# ---- Composite competition ----
+# The competition evaluates ONE head across all three benchmarks.
+# A new king must beat the previous king's composite by >= WIN_MARGIN.
+COMPETITION_BENCHMARKS: tuple[str, ...] = ("math500", "mmlu", "livecodebench")
+WIN_MARGIN: float = 0.02  # 2 percentage points — above the n=120 eval noise band
+
 # Receipt cost vs verified ledger may differ by rounding across many rows.
 LEDGER_RECEIPT_COST_TOLERANCE_USD: float = 0.05
 

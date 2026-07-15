@@ -33,6 +33,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
 from trinity.submission.constants import (
+    COMPETITION_BENCHMARKS,
     DEFAULT_POOL_MODELS,
     DUPLICATE_HEAD_COSINE_THRESHOLD,
     EXPECTED_TOTAL_PARAMS,
@@ -41,6 +42,7 @@ from trinity.submission.constants import (
     N_HEAD_MODELS,
     RATE_LIMIT_MAX_SUBMISSIONS,
     RATE_LIMIT_WINDOW_DAYS,
+    WIN_MARGIN,
 )
 from trinity.submission.gates import (
     check_duplicate as _check_duplicate,
@@ -372,16 +374,14 @@ def _record_attempt(benchmark: str, miner_name: str, generation: int,
     recent winner remains rate-limited after this change rolls out.
     """
     lb = _load_leaderboard()
+    # Write into benchmarks.composite so check_rate_limit (which reads
+    # lb["benchmarks"][benchmark]) finds the attempts. The competition
+    # metadata lives under lb["competition"]; rate-limiting lives here.
     bench_entry = lb.setdefault("benchmarks", {}).setdefault(
         benchmark, _empty_bench_entry(),
     )
     if "attempts" not in bench_entry:
-        bench_entry["attempts"] = [
-            dict(entry) for entry in bench_entry.get("history", [])
-        ]
-    # Idempotent per PR: a re-run of the same PR (CI retry, transient failure
-    # after this point on a prior run) must not append a second attempt and
-    # inflate the miner's weekly count. A distinct PR always records.
+        bench_entry["attempts"] = []
     already = any(
         e.get("miner") == miner_name and e.get("pr") == pr_number
         for e in bench_entry["attempts"]
@@ -400,33 +400,30 @@ def _record_attempt(benchmark: str, miner_name: str, generation: int,
     print(f"[pr_eval] attempt recorded for rate limit ({miner_name}/{generation})")
 
 
-def _update_leaderboard(benchmark: str, miner_name: str, generation: int,
-                         pr_number: int, score: float, hidden_acc: float,
-                         live_acc: float, avg_turns: float) -> None:
-    """Update leaderboard.json with a new winning submission."""
+def _update_leaderboard(miner_name: str, generation: int,
+                         pr_number: int, composite_score: float,
+                         per_benchmark: dict) -> None:
+    """Update leaderboard.json with a new winning composite submission."""
     lb = _load_leaderboard()
-    bench_entry = lb.setdefault("benchmarks", {}).setdefault(
-        benchmark, _empty_bench_entry(),
-    )
-
-    bench_entry["best_score"] = round(score, 4)
-    bench_entry["best_miner"] = miner_name
-    bench_entry["best_generation"] = generation
-    bench_entry["best_pr"] = pr_number
-    bench_entry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-    bench_entry.setdefault("history", []).append({
+    comp = lb.setdefault("competition", {})
+    comp["best_composite_score"] = round(composite_score, 4)
+    comp["best_miner"] = miner_name
+    comp["best_generation"] = generation
+    comp["best_pr"] = pr_number
+    comp["best_per_benchmark"] = {k: v["score"] for k, v in per_benchmark.items()}
+    comp["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    comp.setdefault("history", []).append({
         "miner": miner_name,
         "generation": generation,
-        "score": round(score, 4),
+        "score": round(composite_score, 4),
+        "per_benchmark": {k: v["score"] for k, v in per_benchmark.items()},
         "pr": pr_number,
         "merged": True,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     })
-
     lb["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     (_REPO / "leaderboard.json").write_text(json.dumps(lb, indent=2) + "\n")
-    print(f"[pr_eval] leaderboard.json updated")
+    print(f"[pr_eval] leaderboard.json updated — new king: {miner_name} ({composite_score:.4f})")
 
 
 # ==========================================================================
@@ -435,9 +432,16 @@ def _update_leaderboard(benchmark: str, miner_name: str, generation: int,
 
 async def evaluate_pr(pr_number: int, benchmark: str,
                        submission_subpath: str) -> dict:
-    """Evaluate a PR submission against the hidden benchmark with all 8 gates."""
+    """Evaluate a PR submission against ALL hidden benchmarks with all 8 gates.
+
+    The head is evaluated on every benchmark in COMPETITION_BENCHMARKS
+    (math500, mmlu, livecodebench). The composite score = mean of the
+    per-benchmark scores. A new king must beat the previous king's composite
+    by >= WIN_MARGIN (0.02).
+    """
+    benchmarks = list(COMPETITION_BENCHMARKS)
     print(f"\n{'='*60}")
-    print(f"[pr_eval] PR #{pr_number} — {benchmark}")
+    print(f"[pr_eval] PR #{pr_number} — composite ({', '.join(benchmarks)})")
     print(f"{'='*60}")
 
     # ---- Parse submission path ----
@@ -464,12 +468,12 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     # GATE 1: Rate Limiting (before any GPU/API work)
     # ══════════════════════════════════════════════════════════════
     lb = _load_leaderboard()
-    err = _check_rate_limit(miner_name, benchmark, lb, current_pr=pr_number)
+    err = _check_rate_limit(miner_name, "composite", lb, current_pr=pr_number)
     if err:
         return _reject(err)
     # Slot consumed even if later gates fail or the score loses — otherwise
     # rejected attempts never counted and miners could probe weekly.
-    _record_attempt(benchmark, miner_name, generation, pr_number)
+    _record_attempt("composite", miner_name, generation, pr_number)
 
     # ══════════════════════════════════════════════════════════════
     # GATE 2: Weight Validation (NaN, Inf, extreme values, untrained)
@@ -505,7 +509,7 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     # ══════════════════════════════════════════════════════════════
     # GATE 6: Receipt schema / benchmark consistency (offline)
     # ══════════════════════════════════════════════════════════════
-    err = validate_pack_schema(receipt, benchmark)
+    err = validate_pack_schema(receipt, "composite")
     if err:
         return _reject(err)
 
@@ -519,12 +523,8 @@ async def evaluate_pr(pr_number: int, benchmark: str,
     print("[pr_eval] All 7 pre-eval gates passed ✓\n")
 
     # ══════════════════════════════════════════════════════════════
-    # Load benchmark + encoder (GPU work starts here)
+    # Load encoder ONCE (shared across all benchmarks)
     # ══════════════════════════════════════════════════════════════
-    eval_items, audit_items, live_items = _load_hidden_benchmark(benchmark)
-    print(f"[pr_eval] Loaded encrypted benchmark: {len(eval_items)} eval + "
-          f"{len(audit_items)} audit + {len(live_items)} live questions")
-
     from trinity.coordinator.policy import CoordinatorPolicy
     from trinity.llm.openrouter_client import OpenRouterPool
 
@@ -546,80 +546,91 @@ async def evaluate_pr(pr_number: int, benchmark: str,
         np.asarray(svf_scales, dtype=np.float64).ravel(),
     ]), spec)
 
-    # ---- Cached eval ----
-    print("[pr_eval] Running cached eval (150 questions)...")
-    t0 = time.time()
-    hidden_acc = _evaluate_cached(policy, eval_items, _POOL_MODELS)
-    print(f"  hidden_acc = {hidden_acc:.4f}  ({time.time() - t0:.1f}s)")
-
-    # ---- Audit eval ----
-    print("[pr_eval] Running audit eval (50 questions)...")
-    audit_acc = _evaluate_cached(policy, audit_items, _POOL_MODELS) if audit_items else hidden_acc
-    print(f"  audit_acc  = {audit_acc:.4f}")
-
-    # ══════════════════════════════════════════════════════════════
-    # GATE 5: Overfit Rejection (HARD gate — not just a warning)
-    # ══════════════════════════════════════════════════════════════
-    gap = hidden_acc - audit_acc
-    overfit_penalty = 1.0
-    if gap > _OVERFIT_HARD_REJECT:
-        return _reject(f"overfit_rejected: eval-audit gap {gap:.4f} > {_OVERFIT_HARD_REJECT}")
-    elif gap > _OVERFIT_PENALTY:
-        overfit_penalty = 0.85
-        print(f"  overfit_penalty = 0.85 (gap {gap:.4f} > {_OVERFIT_PENALTY})")
-    else:
-        print(f"  eval-audit gap = {gap:.4f} (clean)")
-
-    # ---- Live eval ----
-    print("[pr_eval] Running live multi-turn eval (20 questions, real API calls)...")
     pool = OpenRouterPool(str(_REPO / "configs" / "models.yaml"))
-    live_acc, avg_turns = await _evaluate_live(policy, pool, _POOL_MODELS, live_items)
-    print(f"  live_acc   = {live_acc:.4f}  avg_turns = {avg_turns:.2f}")
 
     # ══════════════════════════════════════════════════════════════
-    # GATE 7: Compute actual novelty
+    # Evaluate on EACH benchmark
     # ══════════════════════════════════════════════════════════════
-    novelty = _compute_novelty(benchmark, policy, spec, eval_items)
-    print(f"  novelty    = {novelty:.4f}")
+    per_benchmark: dict[str, dict] = {}
+    for bench in benchmarks:
+        print(f"\n[pr_eval] --- {bench} ---")
+        eval_items, audit_items, live_items = _load_hidden_benchmark(bench)
+        print(f"  {len(eval_items)} eval + {len(audit_items)} audit + {len(live_items)} live")
 
-    # ---- Composite score ----
-    score = _compute_score(hidden_acc, live_acc, avg_turns, novelty)
-    score *= overfit_penalty
-    print(f"  composite  = {score:.4f}")
+        t0 = time.time()
+        hidden_acc = _evaluate_cached(policy, eval_items, _POOL_MODELS)
+        print(f"  hidden_acc = {hidden_acc:.4f}  ({time.time() - t0:.1f}s)")
 
-    # ---- Compare to leaderboard ----
+        audit_acc = _evaluate_cached(policy, audit_items, _POOL_MODELS) if audit_items else hidden_acc
+        print(f"  audit_acc  = {audit_acc:.4f}")
+        gap = hidden_acc - audit_acc
+        overfit_penalty = 1.0
+        if gap > _OVERFIT_HARD_REJECT:
+            return _reject(f"overfit_rejected ({bench}): eval-audit gap {gap:.4f} > {_OVERFIT_HARD_REJECT}")
+        elif gap > _OVERFIT_PENALTY:
+            overfit_penalty = 0.85
+            print(f"  overfit_penalty = 0.85 (gap {gap:.4f})")
+        else:
+            print(f"  eval-audit gap = {gap:.4f} (clean)")
+
+        print(f"  live eval ({len(live_items)} questions, real API)...")
+        live_acc, avg_turns = await _evaluate_live(policy, pool, _POOL_MODELS, live_items)
+        print(f"  live_acc   = {live_acc:.4f}  avg_turns = {avg_turns:.2f}")
+
+        novelty = _compute_novelty(bench, policy, spec, eval_items) if bench == benchmarks[0] else 0.0
+        if novelty:
+            print(f"  novelty    = {novelty:.4f}")
+
+        bench_score = _compute_score(hidden_acc, live_acc, avg_turns, novelty) * overfit_penalty
+        print(f"  bench_score = {bench_score:.4f}")
+        per_benchmark[bench] = {
+            "score": round(bench_score, 4),
+            "hidden_acc": round(hidden_acc, 4),
+            "audit_acc": round(audit_acc, 4),
+            "live_acc": round(live_acc, 4),
+            "avg_turns": round(avg_turns, 2),
+        }
+
+    # ══════════════════════════════════════════════════════════════
+    # Composite score + margin check
+    # ══════════════════════════════════════════════════════════════
+    composite_score = sum(v["score"] for v in per_benchmark.values()) / len(per_benchmark)
+    print(f"\n[pr_eval] Composite: {composite_score:.4f}")
+    for b, v in per_benchmark.items():
+        print(f"  {b:20s} = {v['score']:.4f}")
+
     lb = _load_leaderboard()
-    best_score = lb.get("benchmarks", {}).get(benchmark, {}).get("best_score", 0.0)
+    comp = lb.get("competition", {})
+    best_composite = comp.get("best_composite_score", 0.0)
+    margin = comp.get("win_margin", WIN_MARGIN)
 
-    print(f"\n  Current best: {best_score:.4f}")
-    print(f"  Submission:   {score:.4f}")
-    print(f"  Delta:        {score - best_score:+.4f}")
+    print(f"\n  Current king:  {best_composite:.4f}")
+    print(f"  Submission:    {composite_score:.4f}")
+    print(f"  Delta:         {composite_score - best_composite:+.4f}")
+    print(f"  Win margin:    >= {margin:.4f}")
+    clears = composite_score >= best_composite + margin
+    print(f"  Clears margin: {'YES' if clears else 'NO'}")
 
-    if score > best_score:
-        print(f"\n  *** APPROVED *** — beats current best by {score - best_score:+.4f}")
-        _update_leaderboard(benchmark, miner_name, generation, pr_number,
-                            score, hidden_acc, live_acc, avg_turns)
+    if clears:
+        print(f"\n  *** APPROVED *** — beats king by {composite_score - best_composite:+.4f}")
+        _update_leaderboard(miner_name, generation, pr_number,
+                            composite_score, per_benchmark)
         return {
             "approved": True,
-            "score": round(score, 4),
-            "best_score": round(score, 4),
-            "delta": round(score - best_score, 4),
-            "message": f"APPROVED: score {score:.4f} beats current best {best_score:.4f} by {score - best_score:+.4f}",
+            "score": round(composite_score, 4),
+            "best_score": round(composite_score, 4),
+            "delta": round(composite_score - best_composite, 4),
+            "per_benchmark": per_benchmark,
+            "message": f"APPROVED: composite {composite_score:.4f} beats king {best_composite:.4f} by {composite_score - best_composite:+.4f} (margin {margin:.4f})",
         }
     else:
-        # ══════════════════════════════════════════════════════════════
-        # GATE 6: Minimize score feedback on rejection
-        # Only reveal composite score + delta. NEVER reveal component scores.
-        # ══════════════════════════════════════════════════════════════
-        print(f"\n  *** REJECTED *** — does not beat current best ({best_score:.4f})")
-        print(f"  [internal] hidden={hidden_acc:.4f} audit={audit_acc:.4f} "
-              f"live={live_acc:.4f} novelty={novelty:.4f} turns={avg_turns:.2f}")
+        print(f"\n  *** REJECTED *** — does not clear margin {margin:.4f} vs king {best_composite:.4f}")
         return {
             "approved": False,
-            "score": round(score, 4),
-            "best_score": best_score,
-            "delta": round(score - best_score, 4),
-            "message": f"REJECTED: score {score:.4f} does not beat current best {best_score:.4f} (delta: {score - best_score:+.4f})",
+            "score": round(composite_score, 4),
+            "best_score": best_composite,
+            "delta": round(composite_score - best_composite, 4),
+            "message": f"REJECTED: composite {composite_score:.4f} does not beat king {best_composite:.4f} by margin {margin:.4f} (delta: {composite_score - best_composite:+.4f})",
         }
 
 
@@ -648,8 +659,8 @@ def main() -> None:
     )
     ap.add_argument("--pr", type=int, required=True, dest="pr_number",
                     help="GitHub PR number")
-    ap.add_argument("--benchmark", default="math500",
-                    help="Benchmark name (math500 or mmlu)")
+    ap.add_argument("--benchmark", default="composite",
+                    help="(deprecated, kept for CI compat — the competition is composite)")
     ap.add_argument("--submission", required=True, dest="submission_subpath",
                     help="Path to submission relative to repo root (e.g. alice/1)")
     args = ap.parse_args()

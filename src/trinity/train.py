@@ -184,8 +184,21 @@ async def train(args) -> dict:
     _pat_arg = getattr(args, "patience", None)
     patience = _pat_arg if _pat_arg is not None else int(sc.get("patience", 0))
 
-    tasks = _load_train_tasks(args.benchmark, max_items=args.max_items, seed=args.seed)
-    print(f"[train] loaded {len(tasks)} train tasks")
+    # ---- Load training tasks (single or mixed-benchmark) ----
+    if getattr(args, "benchmarks", "") and args.benchmarks.strip():
+        bench_list = [b.strip() for b in args.benchmarks.split(",") if b.strip()]
+        benchmark_label = "composite"
+        tasks = []
+        per_bench_counts = {}
+        for b in bench_list:
+            btasks = _load_train_tasks(b, max_items=args.max_items, seed=args.seed)
+            per_bench_counts[b] = len(btasks)
+            tasks.extend(btasks)
+        print(f"[train] mixed-benchmark: {per_bench_counts} -> {len(tasks)} total train tasks")
+    else:
+        benchmark_label = args.benchmark or "math500"
+        tasks = _load_train_tasks(benchmark_label, max_items=args.max_items, seed=args.seed)
+        print(f"[train] loaded {len(tasks)} train tasks ({benchmark_label})")
 
     selector: ValidationSelector | None = None
     val_tasks: list = []
@@ -210,7 +223,7 @@ async def train(args) -> dict:
     print(f"[train] sep-CMA-ES: λ={es.popsize}, σ0={sigma0}, m_cma={m_cma}, T={generations}, "
           f"budget≈{es.popsize * m_cma * generations}")
 
-    run_dir = _REPO / "experiments" / args.benchmark / args.run_name
+    run_dir = _REPO / "experiments" / benchmark_label / args.run_name
     run_dir.mkdir(parents=True, exist_ok=True)
     history: list[dict] = []
 
@@ -302,7 +315,7 @@ async def train(args) -> dict:
               else train_best_x)
     np.save(run_dir / "best_theta.npy", best_x)
     summary = build_summary(
-        benchmark=args.benchmark,
+        benchmark=benchmark_label,
         pool_models=pool_models,
         n_total=spec.n_total,
         popsize=es.popsize,
@@ -328,7 +341,10 @@ async def train(args) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evolve the TRINITY coordinator with sep-CMA-ES")
-    ap.add_argument("--benchmark", required=True, help="math500 | mmlu | gpqa | livecodebench")
+    ap.add_argument("--benchmark", default="", help="single benchmark (math500 | mmlu | gpqa | livecodebench)")
+    ap.add_argument("--benchmarks", default="",
+                    help="comma-separated list for mixed-benchmark training (e.g. math500,mmlu,livecodebench). "
+                         "Overrides --benchmark; the head trains across all listed benchmarks.")
     ap.add_argument("--config", default=str(_REPO / "configs" / "trinity.yaml"))
     ap.add_argument("--models", default=str(_REPO / "configs" / "models.yaml"))
     ap.add_argument("--max-items", type=int, default=256, dest="max_items")
