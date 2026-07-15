@@ -35,7 +35,12 @@ def answers_agree(benchmark: str, a: str, b: str) -> bool:
     """
     from trinity.orchestration import reward as _reward
 
-    key = (benchmark or "").strip().lower()
+    # Resolve versioned/adapter identities (e.g. ``livecodebench_v6``) to their
+    # dispatch key, exactly as ``score_text`` / ``has_answer`` / ``grading_explain``
+    # do. Membership-testing the raw string would miss the alias and fall through to
+    # the exact-text default, so two models emitting the SAME code would not cluster
+    # while the scorer still grades them as code — clustering and scoring disagreeing.
+    key = _reward.resolve_benchmark(benchmark)
     if key in _reward.CHOICE_BENCHMARKS:
         la = _reward.extract_choice_letter(a)
         return la is not None and la == _reward.extract_choice_letter(b)

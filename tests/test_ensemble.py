@@ -52,6 +52,30 @@ def test_answers_agree_choice_and_fallback():
     assert answers_agree("toy", "X", "Y") is False
 
 
+def test_answers_agree_resolves_versioned_code_alias():
+    # A versioned identity (livecodebench_v6) must grade as CODE, like the scorer
+    # does — two models emitting the same code agree even with different prose,
+    # instead of falling through to the exact-text default.
+    m2 = "Solution:\n```python\ndef solve():\n    return 42\n```"
+    m3 = "```python\ndef solve():\n    return 42\n```"        # same code, no prose
+    assert answers_agree("livecodebench", m2, m3) is True
+    assert answers_agree("livecodebench_v6", m2, m3) is True  # was False (alias unresolved)
+    # distinct code still disagrees under the alias.
+    m4 = "```python\ndef solve():\n    return 0\n```"
+    assert answers_agree("livecodebench_v6", m2, m4) is False
+
+
+def test_plurality_clusters_same_code_under_versioned_alias():
+    # End-to-end: two v6 models with identical code but different prose form the
+    # plurality over a lone dissenter, instead of a 3-way no-majority split.
+    answers = {
+        "m1": "```python\ndef solve():\n    return 0\n```",           # dissenter
+        "m2": "Solution:\n```python\ndef solve():\n    return 42\n```",
+        "m3": "```python\ndef solve():\n    return 42\n```",
+    }
+    assert plurality_answer("livecodebench_v6", answers) == answers["m2"]
+
+
 # --------------------------------------------------------------------------- #
 # plurality_answer
 # --------------------------------------------------------------------------- #
