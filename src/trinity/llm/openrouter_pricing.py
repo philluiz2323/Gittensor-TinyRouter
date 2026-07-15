@@ -31,7 +31,7 @@ __all__ = [
 # scripts/oracle_ceiling.py::_DEFAULT_PRICES and configs/models.yaml pool.
 OPENROUTER_POOL_PRICES: dict[str, tuple[float, float]] = {
     "qwen3.5": (0.14, 1.00),
-    "gemini-flash-lite": (0.075, 0.30),
+    "gemini-flash-lite": (0.25, 1.50),
     "deepseek-v4-flash": (0.09, 0.18),
 }
 
