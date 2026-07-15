@@ -711,11 +711,15 @@ def _sympy_equal(a: str, b: str) -> bool:
             parse_expr,
             standard_transformations,
             implicit_multiplication_application,
+            convert_xor,
         )
     except Exception:
         return False
+    # convert_xor: in math answers ``^`` means exponentiation, not Python's
+    # bitwise XOR — without it ``2^6`` parses as ``2 XOR 6 = 4`` (issue #342).
     transformations = standard_transformations + (
         implicit_multiplication_application,
+        convert_xor,
     )
     try:
         ea = parse_expr(a, transformations=transformations, evaluate=True)
