@@ -104,7 +104,7 @@ trinity/
 │   ├── PAPER_NOTES.md     # raw section-by-section extraction of the paper
 │   ├── JOURNAL.md         # ★ running log of mistakes, findings, decisions (see §6)
 │   └── paper/             # local paper text (gitignored)
-├── configs/               # models.yaml, trinity.yaml, benchmarks.yaml
+├── configs/               # models.yaml, trinity.yaml
 ├── src/trinity/
 │   ├── llm/               # OpenRouter client + model-pool abstraction
 │   ├── coordinator/       # 0.6B encoder, hidden-state extraction, ~10K head, policy

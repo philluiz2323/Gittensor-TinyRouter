@@ -142,7 +142,7 @@ async def _run(args) -> int:
     print(
         json.dumps(
             {
-                "mode": "stub" if args.stub_pool else "fireworks",
+                "mode": "stub" if args.stub_pool else "openrouter",
                 "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
                 "device": args.device,
                 "model": args.model_name,

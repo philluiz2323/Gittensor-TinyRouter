@@ -126,7 +126,7 @@ Gittensor-TinyRouter/
 │
 ├── submissions/                    Miner submissions (PR'd)
 ├── experiments/                    Run outputs (gitignored)
-├── configs/                        trinity.yaml, models.yaml, benchmarks.yaml
+├── configs/                        trinity.yaml, models.yaml
 │
 ├── docs/                           Documentation
 │   ├── SPEC.md                     Implementation spec (TRINITY replication)
