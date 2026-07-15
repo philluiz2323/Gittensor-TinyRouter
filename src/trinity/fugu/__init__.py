@@ -18,12 +18,12 @@ Layout (mirrors ``openfugu/`` upstream):
   ``is_correct`` used for honest evaluation.
 * :mod:`trinity.fugu.conductor`  the policy that proposes a workflow: a prompted
   baseline (zero training) and a stub for offline tests; the trained-LM backend
-  is wired on the remote box (see docs/fugu/REPLICATION_PLAN.md).
+  is wired on the remote box (see the JOURNAL for the build history).
 * :mod:`trinity.fugu.grpo`       framework-agnostic GRPO math (group-normalized
   advantages, no KL) and the rollout/loop skeleton.
 
-The worker pool is the current OpenRouter-backed trio: qwen3.5-35b-a3b,
-minimax-m3, and deepseek-v4-flash.
+The worker pool is the current OpenRouter-backed trio: qwen3.5,
+  gemini-flash-lite, and deepseek-v4-flash.
 """
 from __future__ import annotations
 

@@ -11,7 +11,7 @@
 
 *Fill this section if you checked the box above. Otherwise delete it.*
 
-**Benchmark:** (math500 or mmlu)
+**Benchmark:** composite (one head across math500 + mmlu + livecodebench)
 
 **Miner name:** (your miner identity)
 

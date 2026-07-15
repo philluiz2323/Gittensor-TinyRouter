@@ -4,7 +4,7 @@
 Reads the ``fugu_baseline_<bench>.json`` files ``scripts/fugu_baseline_eval.py`` writes
 and reports, per run, the per-worker token/cost shares, the effective number of workers
 (1/HHI), the fanout tax, $/correct, and the routing-vs-test-time-compute verdict — the
-analysis docs/fugu/BASELINE_RESULTS.md currently does by hand.
+analysis this script automates.
 
     python scripts/fugu_cost_report.py experiments/final/fugu_baseline_*.json
     python scripts/fugu_cost_report.py --root experiments --json fugu_cost.json

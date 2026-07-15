@@ -36,8 +36,8 @@ always welcome. These PRs follow normal open-source workflow.
 ## Setup
 
 ```bash
-git clone https://github.com/<org>/tinyrouter.git
-cd tinyrouter
+git clone https://github.com/James-CUDA/Gittensor-TinyRouter.git
+cd Gittensor-TinyRouter
 pip install -e ".[dev]"
 source ~/.config/trinity/secrets.env   # exports OPENROUTER_API_KEY
 ```

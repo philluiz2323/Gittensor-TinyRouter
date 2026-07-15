@@ -3,7 +3,7 @@
 ``scripts/fugu_baseline_eval.py`` writes ``experiments/final/fugu_baseline_<bench>.json``
 with a ``cost`` block (``spend_usd``, ``llm_calls``, and a per-model prompt/completion
 token + usd breakdown — the ``fugu.cost.CostMeter.report()`` schema), but **nothing
-consumes it**. ``docs/fugu/BASELINE_RESULTS.md`` performs this exact analysis **by hand**:
+consumes it**. This module automates that analysis:
 
     "The lift is test-time compute, not routing. The Conductor sent ~all work to deepseek
      (deepseek 203k completion tokens vs glm 271, kimi 64) ... Cost of the lift: $1.10 for

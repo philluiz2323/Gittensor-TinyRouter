@@ -11,8 +11,7 @@ Two implementations:
   offline tests (no network).
 
 The trained-LM backend (an HF model fine-tuned by GRPO on the remote H200) plugs
-in by implementing the same :class:`Conductor` protocol; see
-docs/fugu/REPLICATION_PLAN.md.
+in by implementing the same :class:`Conductor` protocol.
 """
 from __future__ import annotations
 

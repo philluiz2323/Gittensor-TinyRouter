@@ -55,9 +55,9 @@ The three coordinated LLMs are served through the **OpenRouter** OpenAI-compatib
 
 | Slot | OpenRouter model slug        | Short name          |
 | ---- | ---------------------------- | ------------------- |
-| A    | `qwen/qwen3.5-35b-a3b`       | `qwen3.5-35b-a3b`   |
-| B    | `minimax/minimax-m3`         | `minimax-m3`        |
-| C    | `deepseek/deepseek-v4-flash` | `deepseek-v4-flash` |
+| A    | `qwen/qwen3.5-35b-a3b`         | `qwen3.5`             |
+| B    | `google/gemini-3.1-flash-lite` | `gemini-flash-lite`   |
+| C    | `deepseek/deepseek-v4-flash`   | `deepseek-v4-flash`   |
 
 All three were confirmed reachable with the project API key. The compact ~0.6B coordinator
 encoder runs **locally on our own GPU** (see below), not on OpenRouter.
@@ -100,8 +100,7 @@ trinity/
 ├── AGENTS.md              # this file — goal, rules, logging protocol
 ├── README.md              # quickstart
 ├── docs/
-│   ├── SPEC.md            # implementation spec distilled from the paper
-│   ├── PAPER_NOTES.md     # raw section-by-section extraction of the paper
+│   ├── SPEC.md            # implementation spec
 │   ├── JOURNAL.md         # ★ running log of mistakes, findings, decisions (see §6)
 │   └── paper/             # local paper text (gitignored)
 ├── configs/               # models.yaml, trinity.yaml
