@@ -6,8 +6,8 @@ The best of the three models on each benchmark is "best-single", the baseline
 that any useful router must at least match.
 
 Usage:
-    python baselines/always_model.py --model qwen3.5 --benchmark math500
-    python baselines/always_model.py --model gemini-flash-lite --benchmark mmlu
+    python baselines/always_model.py --model qwen3.5-35b-a3b --benchmark math500
+    python baselines/always_model.py --model gemini-3.1-flash-lite --benchmark mmlu
     python baselines/always_model.py --model deepseek-v4-flash --benchmark livecodebench
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ async def run(model: str, benchmark: str, max_items: int) -> float:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Always-pick-one-model baseline")
     ap.add_argument("--model", required=True,
-                    help="Model name (qwen3.5, gemini-flash-lite, deepseek-v4-flash)")
+                    help="Model name (qwen3.5-35b-a3b, gemini-3.1-flash-lite, deepseek-v4-flash)")
     ap.add_argument("--benchmark", required=True,
                     help="Benchmark name (math500, mmlu, livecodebench)")
     ap.add_argument("--max-items", type=int, default=120, dest="max_items")

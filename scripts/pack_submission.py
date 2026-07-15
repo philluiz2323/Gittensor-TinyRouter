@@ -76,7 +76,7 @@ def build_receipt(run_dir: Path, benchmark: str) -> dict:
 
     return {
         "benchmark": benchmark,
-        "pool_models": summary.get("pool", ["qwen3.5", "gemini-flash-lite", "deepseek-v4-flash"]),
+        "pool_models": summary.get("pool", ["qwen3.5-35b-a3b", "gemini-3.1-flash-lite", "deepseek-v4-flash"]),
         "n_total": summary.get("n_total", 13312),
         "popsize": summary.get("popsize", 33),
         "m_cma": summary.get("m_cma", 16),

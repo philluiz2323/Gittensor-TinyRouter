@@ -7,8 +7,8 @@ Run these before training to see what you're beating.
 
 ```bash
 # Always pick one model (the floor for each individual model)
-python baselines/always_model.py --model qwen3.5 --benchmark math500
-python baselines/always_model.py --model gemini-flash-lite --benchmark math500
+python baselines/always_model.py --model qwen3.5-35b-a3b --benchmark math500
+python baselines/always_model.py --model gemini-3.1-flash-lite --benchmark math500
 python baselines/always_model.py --model deepseek-v4-flash --benchmark math500
 
 # Random routing (the floor — your head MUST beat this)

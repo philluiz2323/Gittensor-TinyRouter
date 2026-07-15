@@ -55,8 +55,8 @@ The three coordinated LLMs are served through the **OpenRouter** OpenAI-compatib
 
 | Slot | OpenRouter model slug        | Short name          |
 | ---- | ---------------------------- | ------------------- |
-| A    | `qwen/qwen3.5-35b-a3b`         | `qwen3.5`             |
-| B    | `google/gemini-3.1-flash-lite` | `gemini-flash-lite`   |
+| A    | `qwen/qwen3.5-35b-a3b`         | `qwen3.5-35b-a3b`     |
+| B    | `google/gemini-3.1-flash-lite` | `gemini-3.1-flash-lite` |
 | C    | `deepseek/deepseek-v4-flash`   | `deepseek-v4-flash`   |
 
 All three were confirmed reachable with the project API key. The compact ~0.6B coordinator

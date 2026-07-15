@@ -55,8 +55,8 @@ scores. A new king must beat the previous king by **≥ 0.02** (2 percentage poi
 
 | Model | Provider |
 |---|---|
-| `qwen3.5` | OpenRouter |
-| `gemini-flash-lite` | OpenRouter |
+| `qwen3.5-35b-a3b` | OpenRouter |
+| `gemini-3.1-flash-lite` | OpenRouter |
 | `deepseek-v4-flash` | OpenRouter |
 
 ## Documentation
@@ -73,7 +73,7 @@ scores. A new king must beat the previous king by **≥ 0.02** (2 percentage poi
 ## Baselines (what to beat)
 
 ```bash
-python baselines/always_model.py --model qwen3.5 --benchmark math500
+python baselines/always_model.py --model qwen3.5-35b-a3b --benchmark math500
 python baselines/random_router.py --benchmark math500 --seeds 100
 ```
 

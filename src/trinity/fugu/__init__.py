@@ -22,8 +22,8 @@ Layout (mirrors ``openfugu/`` upstream):
 * :mod:`trinity.fugu.grpo`       framework-agnostic GRPO math (group-normalized
   advantages, no KL) and the rollout/loop skeleton.
 
-The worker pool is the current OpenRouter-backed trio: qwen3.5,
-  gemini-flash-lite, and deepseek-v4-flash.
+The worker pool is the current OpenRouter-backed trio: qwen3.5-35b-a3b,
+  gemini-3.1-flash-lite, and deepseek-v4-flash.
 """
 from __future__ import annotations
 

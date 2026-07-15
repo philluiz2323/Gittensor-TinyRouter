@@ -216,8 +216,8 @@ All miners route to the **same pool** — routing skill is what's measured:
 
 | Slot | Model | Provider |
 |---|---|---|
-| A | `qwen3.5` | OpenRouter |
-| B | `gemini-flash-lite` | OpenRouter |
+| A | `qwen3.5-35b-a3b` | OpenRouter |
+| B | `gemini-3.1-flash-lite` | OpenRouter |
 | C | `deepseek-v4-flash` | OpenRouter |
 
 All calls use `temperature=0.0` (greedy) for deterministic scoring, with

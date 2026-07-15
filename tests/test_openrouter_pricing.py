@@ -27,8 +27,8 @@ _spec.loader.exec_module(pack_submission)
 # Rate resolution
 # --------------------------------------------------------------------------- #
 def test_resolve_rates_returns_pool_table_for_known_slug():
-    assert OP.resolve_rates("qwen3.5") == (0.14, 1.00)
-    assert OP.resolve_rates("openrouter/qwen3.5") == (0.14, 1.00)
+    assert OP.resolve_rates("qwen3.5-35b-a3b") == (0.14, 1.00)
+    assert OP.resolve_rates("openrouter/qwen3.5-35b-a3b") == (0.14, 1.00)
 
 
 def test_resolve_rates_falls_back_to_blended_default_for_unknown():
@@ -38,14 +38,14 @@ def test_resolve_rates_falls_back_to_blended_default_for_unknown():
 
 def test_token_cost_splits_prompt_and_completion_rates():
     # 1M prompt @ 0.14 + 1M completion @ 1.00 = 1.14 for qwen
-    assert OP.token_cost("qwen3.5", 1_000_000, 1_000_000) == pytest.approx(1.14)
+    assert OP.token_cost("qwen3.5-35b-a3b", 1_000_000, 1_000_000) == pytest.approx(1.14)
 
 
 def test_flat_blended_formula_differs_from_split_pricing():
     """The old bug: one rate on (p+c) is not the same as split in/out."""
     prompt_only = 1_000_000
     completion_only = 0
-    split = OP.token_cost("qwen3.5", prompt_only, completion_only)
+    split = OP.token_cost("qwen3.5-35b-a3b", prompt_only, completion_only)
     flat_bug = 0.90 * (prompt_only + completion_only) / 1_000_000
     assert split == pytest.approx(0.14)
     assert flat_bug == pytest.approx(0.90)
@@ -55,9 +55,9 @@ def test_flat_blended_formula_differs_from_split_pricing():
 @pytest.mark.parametrize(
     "model, prompt, completion, expected",
     [
-        ("qwen3.5", 1_000_000, 0, 0.14),
-        ("qwen3.5", 0, 1_000_000, 1.00),
-        ("gemini-flash-lite", 1_000_000, 1_000_000, 1.75),
+        ("qwen3.5-35b-a3b", 1_000_000, 0, 0.14),
+        ("qwen3.5-35b-a3b", 0, 1_000_000, 1.00),
+        ("gemini-3.1-flash-lite", 1_000_000, 1_000_000, 1.75),
         ("deepseek-v4-flash", 2_000_000, 500_000, 0.27),
     ],
 )
@@ -73,8 +73,8 @@ def test_token_cost_matches_manual_arithmetic(model, prompt, completion, expecte
 # --------------------------------------------------------------------------- #
 def test_sum_entry_costs_aggregates_multiple_models(tmp_path: Path):
     ledger = tmp_path / "ledger.jsonl"
-    CL.append_ledger_entry(ledger, "qwen3.5", 1_000_000, 0)
-    CL.append_ledger_entry(ledger, "gemini-flash-lite", 0, 1_000_000)
+    CL.append_ledger_entry(ledger, "qwen3.5-35b-a3b", 1_000_000, 0)
+    CL.append_ledger_entry(ledger, "gemini-3.1-flash-lite", 0, 1_000_000)
     entries = CL.read_ledger_entries(ledger)
     # 0.14 (qwen prompt) + 1.50 (gemini completion)
     assert OP.sum_entry_costs(entries) == pytest.approx(1.64)
@@ -89,7 +89,7 @@ def test_verified_ledger_total_usd_requires_intact_chain(tmp_path: Path):
 
 def test_verified_ledger_total_usd_returns_none_on_tampered_chain(tmp_path: Path):
     ledger = tmp_path / "ledger.jsonl"
-    CL.append_ledger_entry(ledger, "qwen3.5", 100, 50)
+    CL.append_ledger_entry(ledger, "qwen3.5-35b-a3b", 100, 50)
     text = ledger.read_text(encoding="utf-8")
     ledger.write_text(text.replace('"p":100', '"p":999'), encoding="utf-8")
     assert OP.verified_ledger_total_usd(ledger) is None
@@ -118,7 +118,7 @@ def test_verified_ledger_total_usd_returns_none_for_non_utf8_file(tmp_path: Path
 # --------------------------------------------------------------------------- #
 def test_pack_submission_estimate_cost_matches_pricing_module(tmp_path: Path, monkeypatch):
     ledger = tmp_path / "ledger.jsonl"
-    CL.append_ledger_entry(ledger, "qwen3.5", 2_000_000, 500_000)
+    CL.append_ledger_entry(ledger, "qwen3.5-35b-a3b", 2_000_000, 500_000)
     monkeypatch.setenv("TRINITY_COST_LEDGER", str(ledger))
     assert pack_submission._estimate_cost() == round(OP.verified_ledger_total_usd(ledger), 4)
 
@@ -130,6 +130,6 @@ def test_pack_submission_estimate_cost_zero_without_ledger(monkeypatch):
 
 def test_pack_submission_estimate_cost_zero_on_broken_chain(tmp_path: Path, monkeypatch):
     ledger = tmp_path / "ledger.jsonl"
-    ledger.write_text('{"m":"qwen3.5","p":1,"c":2}\n', encoding="utf-8")
+    ledger.write_text('{"m":"qwen3.5-35b-a3b","p":1,"c":2}\n', encoding="utf-8")
     monkeypatch.setenv("TRINITY_COST_LEDGER", str(ledger))
     assert pack_submission._estimate_cost() == 0.0

@@ -19,14 +19,14 @@ def _verifier_accept_trajectory() -> Trajectory:
         turns=[
             TurnRecord(
                 turn=1,
-                agent_name="gemini-flash-lite",
+                agent_name="gemini-3.1-flash-lite",
                 role=Role.WORKER,
                 raw_output="\\boxed{4}",
                 processed_output="\\boxed{4}",
             ),
             TurnRecord(
                 turn=2,
-                agent_name="qwen3.5",
+                agent_name="qwen3.5-35b-a3b",
                 role=Role.VERIFIER,
                 raw_output="Looks good. VERDICT: ACCEPT",
                 processed_output="Looks good. VERDICT: ACCEPT",

@@ -34,7 +34,7 @@ Verify the pool is reachable:
 python -m trinity.llm.openrouter_client --selftest
 ```
 
-You should see `OK` from all three models: `qwen3.5`, `gemini-flash-lite`,
+You should see `OK` from all three models: `qwen3.5-35b-a3b`, `gemini-3.1-flash-lite`,
 `deepseek-v4-flash`.
 
 ---
@@ -42,11 +42,11 @@ You should see `OK` from all three models: `qwen3.5`, `gemini-flash-lite`,
 ## Step 1: Run the baselines (see what you're beating)
 
 ```bash
-# Always pick model A (qwen3.5) on every question
-python baselines/always_model.py --model qwen3.5 --benchmark math500
+# Always pick model A (qwen3.5-35b-a3b) on every question
+python baselines/always_model.py --model qwen3.5-35b-a3b --benchmark math500
 
-# Always pick model B (gemini-flash-lite)
-python baselines/always_model.py --model gemini-flash-lite --benchmark math500
+# Always pick model B (gemini-3.1-flash-lite)
+python baselines/always_model.py --model gemini-3.1-flash-lite --benchmark math500
 
 # Random routing (the floor — your head must beat this)
 python baselines/random_router.py --benchmark math500 --seeds 100

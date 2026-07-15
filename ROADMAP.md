@@ -13,8 +13,8 @@ Miners compete to train the best routing head across three benchmarks.
 
 | Model | Provider |
 |---|---|
-| `qwen3.5` | OpenRouter |
-| `gemini-flash-lite` | OpenRouter |
+| `qwen3.5-35b-a3b` | OpenRouter |
+| `gemini-3.1-flash-lite` | OpenRouter |
 | `deepseek-v4-flash` | OpenRouter |
 
 **Win condition:** composite score beats current king by ≥ 0.02 (2 percentage points).

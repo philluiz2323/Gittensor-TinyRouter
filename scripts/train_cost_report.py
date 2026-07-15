@@ -7,7 +7,7 @@ below the $15 receipt floor. Exits non-zero if the projected cost is below that
 floor, so a plan that could not produce a valid receipt is caught early.
 
     python scripts/train_cost_report.py --population 33 --m-cma 16 --generations 60 \\
-        --workers qwen3.5 gemini-flash-lite deepseek-v4-flash
+        --workers qwen3.5-35b-a3b gemini-3.1-flash-lite deepseek-v4-flash
 
 Prices default to fugu.cost.PRICES; pass --price NAME IN OUT to override/add.
 """

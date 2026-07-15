@@ -25,7 +25,7 @@ sys.path.insert(0, str(_REPO / "scripts"))
 import pr_eval  # noqa: E402
 from trinity.types import Trajectory, TurnRecord  # noqa: E402
 
-_POOL = ["qwen3.5", "gemini-flash-lite", "deepseek-v4-flash"]
+_POOL = ["qwen3.5-35b-a3b", "gemini-3.1-flash-lite", "deepseek-v4-flash"]
 _GOLD = "diff --git a/f b/f\n@@ -1 +1 @@\n-x\n+y\n"
 _PATCH_REF = {
     "repo": "octo/calc", "base_commit": "c0", "gold_patch": _GOLD,
@@ -50,7 +50,7 @@ def test_cached_scores_swebench_through_its_adapter():
         "question_text": "resolve the issue",
         "benchmark": "swebench_verified",
         "correct_answer": _PATCH_REF,
-        "model_answers": {"qwen3.5": _GOLD},
+        "model_answers": {"qwen3.5-35b-a3b": _GOLD},
     }
     acc = pr_eval._evaluate_cached(_FakePolicy(), [item], _POOL)
     assert acc == 1.0
@@ -72,7 +72,7 @@ def test_cached_math_is_behaviour_preserved():
         "question_text": "2+2",
         "benchmark": "math500",
         "correct_answer": "4",
-        "model_answers": {"qwen3.5": "\\boxed{4}"},
+        "model_answers": {"qwen3.5-35b-a3b": "\\boxed{4}"},
     }
     acc = pr_eval._evaluate_cached(_FakePolicy(), [item], _POOL)
     assert acc == 1.0
@@ -85,7 +85,7 @@ def test_cached_math_wrong_answer_scores_zero():
         "question_text": "2+2",
         "benchmark": "math500",
         "correct_answer": "4",
-        "model_answers": {"qwen3.5": "\\boxed{5}"},
+        "model_answers": {"qwen3.5-35b-a3b": "\\boxed{5}"},
     }
     assert pr_eval._evaluate_cached(_FakePolicy(), [item], _POOL) == 0.0
 
@@ -140,7 +140,7 @@ def test_live_math_is_behaviour_preserved(monkeypatch):
         return Trajectory(
             task=task,
             turns=[
-                TurnRecord(turn=1, agent_name="gemini-flash-lite", role=_worker_role(),
+                TurnRecord(turn=1, agent_name="gemini-3.1-flash-lite", role=_worker_role(),
                            raw_output="\\boxed{4}", processed_output="\\boxed{4}"),
             ],
             final_answer="Looks good.",
