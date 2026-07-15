@@ -134,6 +134,7 @@ python scripts/oracle_ceiling.py --analyze experiments/final/oracle_matrix_math5
 | 🏗️ | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Repo structure, design principles, subsystem map |
 | 🚀 | [`REPRODUCTION_GUIDE.md`](docs/REPRODUCTION_GUIDE.md) | 8-step clone-to-submit walkthrough |
 | 📝 | [`SUBMITTING.md`](SUBMITTING.md) | Submission format + PR workflow |
+| 📖 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | Term definitions |
 
 ## Repository
 
