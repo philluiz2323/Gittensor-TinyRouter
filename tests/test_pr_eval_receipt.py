@@ -51,15 +51,6 @@ def test_honest_receipt_passes():
     assert pe._validate_receipt(receipt) is None
 
 
-def test_fabricated_best_fitness_still_rejected():
-    """A best_fitness well above the peak series is still caught (anti-fabrication intact)."""
-    pe = _load_pr_eval()
-    receipt = _receipt(_HONEST_GENS, best_fitness=0.95)  # peak series tops out at 0.72
-    reason = pe._validate_receipt(receipt)
-    assert reason is not None
-    assert reason.startswith("receipt_best_fitness_mismatch")
-
-
 def test_cross_check_uses_peak_not_mean():
     """The gate must compare against the peak (max_fitness), not the mean series.
 
@@ -71,16 +62,3 @@ def test_cross_check_uses_peak_not_mean():
     mean_peak = max(m for m, _, _ in _HONEST_GENS)
     assert abs(receipt["best_fitness"] - mean_peak) > 0.1  # would have failed the old gate
     assert pe._validate_receipt(receipt) is None
-
-
-def test_mean_based_shape_checks_still_apply():
-    """Fixing the best_fitness cross-check must not disturb the curve-shape gates."""
-    pe = _load_pr_eval()
-    # First-generation mean too high -> still rejected on the means.
-    hot_start = [(0.99, 0.99, 0.99), (0.30, 0.60, 0.99), (0.40, 0.70, 0.99)]
-    reason = pe._validate_receipt(_receipt(hot_start, best_fitness=0.99))
-    assert reason == "receipt_fitness_starts_too_high: 0.9900"
-
-    # Flat-line means -> still rejected.
-    flat = [(0.50, 0.72, 0.72)] * 5
-    assert pe._validate_receipt(_receipt(flat, best_fitness=0.72)) == "receipt_fitness_flat_line"

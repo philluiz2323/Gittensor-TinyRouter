@@ -675,7 +675,7 @@ def math_equal(a: str | None, b: str | None, *, abs_tol: float = 1e-6) -> bool:
     # so "005" does not match "5" or "009".  Only apply to all-digit strings
     # to avoid blocking legitimate comparisons like "0.5" vs "1/2".
     def _is_zero_padded(s: str) -> bool:
-        return s[0] == "0" and len(s) > 1 and s.isdigit()
+        return len(s) > 1 and s[0] == "0" and s.isdigit()
 
     if _is_zero_padded(na) or _is_zero_padded(nb):
         return False

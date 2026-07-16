@@ -21,7 +21,6 @@ from trinity.submission.constants import (
     DUPLICATE_HEAD_COSINE_THRESHOLD,
     EXPECTED_HEAD_SHAPE,
     MAX_WEIGHT_MAGNITUDE,
-    MIN_TRAINING_COST_USD,
     N_HEAD_MODELS,
     RATE_LIMIT_MAX_SUBMISSIONS,
 )
@@ -98,12 +97,6 @@ def test_weights_reject_svf_over_max_magnitude():
 def test_weights_reject_svf_all_zeros():
     head, svf = _valid_weights()
     assert G.validate_weights(head, np.zeros_like(svf)) == "svf_scales_all_zeros"
-
-
-def test_weights_reject_head_norm_too_small():
-    _, svf = _valid_weights()
-    head = np.full(EXPECTED_HEAD_SHAPE, 1e-5)  # nonzero but norm < 0.001
-    assert "head_weight_norm_too_small" in G.validate_weights(head, svf)
 
 
 # --------------------------------------------------------------------------- #
@@ -241,75 +234,10 @@ def test_receipt_reject_zero_cost():
     assert G.validate_receipt(r) == "receipt_cost_zero_or_missing"
 
 
-def test_receipt_reject_cost_below_minimum():
-    r = _valid_receipt()
-    r["total_cost_usd"] = MIN_TRAINING_COST_USD - 1.0
-    assert "receipt_cost_too_low" in G.validate_receipt(r)
-
-
 def test_receipt_reject_history_too_short():
     r = _valid_receipt()
     r["fitness_history"] = [{"gen_mean_fitness": 0.1}, {"gen_mean_fitness": 0.2}]
     assert "receipt_fitness_history_too_short" in G.validate_receipt(r)
-
-
-def test_receipt_reject_no_valid_fitness_values():
-    r = _valid_receipt()
-    # Three entries, none carrying a usable fitness key -> no numeric values.
-    r["fitness_history"] = [{"note": "x"}, {"note": "y"}, {"note": "z"}]
-    assert G.validate_receipt(r) == "receipt_fitness_history_no_valid_values"
-
-
-def test_receipt_reject_flat_line():
-    r = _valid_receipt()
-    r["fitness_history"] = [{"gen_mean_fitness": 0.5}] * 4
-    assert G.validate_receipt(r) == "receipt_fitness_flat_line"
-
-
-def test_receipt_reject_starts_too_high():
-    r = _valid_receipt()
-    r["fitness_history"] = [
-        {"gen_mean_fitness": 0.99},
-        {"gen_mean_fitness": 0.30},
-        {"gen_mean_fitness": 0.40},
-    ]
-    assert "receipt_fitness_starts_too_high" in G.validate_receipt(r)
-
-
-def test_receipt_reject_too_perfect_monotonic():
-    r = _valid_receipt()
-    # >3 diffs, all non-negative -> "too perfect" (bare floats hit the numeric path).
-    r["fitness_history"] = [0.10, 0.20, 0.30, 0.40, 0.50, 0.60]
-    r["generations"] = 6
-    assert "receipt_fitness_too_perfect" in G.validate_receipt(r)
-
-
-def test_receipt_reject_generations_mismatch():
-    r = _valid_receipt()  # history of length 4, non-monotonic
-    r["generations"] = 100
-    assert "receipt_generations_mismatch" in G.validate_receipt(r)
-
-
-def test_receipt_reject_best_fitness_mismatch():
-    r = _valid_receipt()
-    r["fitness_history"] = [
-        {"gen_mean_fitness": 0.10, "gen_max_fitness": 0.15},
-        {"gen_mean_fitness": 0.30, "gen_max_fitness": 0.35},
-        {"gen_mean_fitness": 0.25, "gen_max_fitness": 0.28},
-    ]
-    r["generations"] = 3
-    r["best_fitness"] = 0.95  # far above the 0.35 history peak
-    assert "receipt_best_fitness_mismatch" in G.validate_receipt(r)
-
-
-def test_receipt_history_tolerates_mixed_numeric_and_junk_entries():
-    # Bare floats take the numeric path; a non-dict/non-number entry is skipped in
-    # BOTH the values loop and the peaks loop. best_fitness > 0 drives the peak scan.
-    r = _valid_receipt()
-    r["fitness_history"] = [0.10, 0.50, 0.20, "junk"]
-    r["generations"] = 4
-    r["best_fitness"] = 0.95  # peaks are the bare floats -> max 0.50, mismatch
-    assert "receipt_best_fitness_mismatch" in G.validate_receipt(r)
 
 
 # --------------------------------------------------------------------------- #

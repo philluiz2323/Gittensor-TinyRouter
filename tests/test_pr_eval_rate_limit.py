@@ -90,8 +90,8 @@ def _leaderboard_with(miner: str, ages_days: list[float], *, key: str = "history
 
 
 def test_recent_submission_is_rate_limited():
-    """A submission one day ago blocks a new one (window is 1 day)."""
-    lb = _leaderboard_with("alice", [1.0])
+    """A submission half a day ago blocks a new one (window is 1 day)."""
+    lb = _leaderboard_with("alice", [0.5])
     err = pr_eval._check_rate_limit("alice", "math500", lb)
     assert err is not None and "rate_limited" in err
 
@@ -114,7 +114,7 @@ def test_rejected_attempt_still_rate_limits():
     submit, lose on score, and immediately resubmit — the daily slot was never
     consumed. ``attempts`` is the authoritative log.
     """
-    lb = _leaderboard_with("alice", [1.0], key="attempts")
+    lb = _leaderboard_with("alice", [0.5], key="attempts")
     # Empty win log must not clear the rate limit.
     lb["benchmarks"]["math500"]["history"] = []
     err = pr_eval._check_rate_limit("alice", "math500", lb)
@@ -133,7 +133,7 @@ def test_attempts_preferred_over_legacy_history():
                     {"miner": "alice", "timestamp": _utc_stamp(now - 10 * 86400)}
                 ],
                 "attempts": [
-                    {"miner": "alice", "timestamp": _utc_stamp(now - 1 * 86400)}
+                    {"miner": "alice", "timestamp": _utc_stamp(now - 0.5 * 86400)}
                 ],
             }
         }
@@ -155,7 +155,7 @@ def test_record_attempt_seeds_from_legacy_history(tmp_path, monkeypatch):
                         "generation": 1,
                         "pr": 10,
                         "merged": True,
-                        "timestamp": _utc_stamp(now - 2 * 86400),
+                        "timestamp": _utc_stamp(now - 0.5 * 86400),
                     }
                 ],
             }

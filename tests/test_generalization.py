@@ -41,7 +41,8 @@ def test_thresholds_match_pr_eval_gate5():
     pe = importlib.util.module_from_spec(spec)
     sys.modules["pr_eval"] = pe
     spec.loader.exec_module(pe)
-    assert gen.    assert gen.OVERFIT_PENALTY == pe._OVERFIT_PENALTY
+    assert gen.OVERFIT_HARD_REJECT == pe._OVERFIT_HARD_REJECT
+    assert gen.OVERFIT_PENALTY == pe._OVERFIT_PENALTY
 
 
 # --------------------------------------------------------------------------- #
@@ -50,9 +51,9 @@ def test_thresholds_match_pr_eval_gate5():
 def test_overfit_verdict_thresholds():
     assert overfit_verdict(0.02) == ("ok", 1.0)
     assert overfit_verdict(-0.05) == ("ok", 1.0)         # audit >= eval, no overfit
-    assert overfit_verdict(0.07) == ("penalty", 0.85)
-    assert overfit_verdict(0.15) == ("reject", 0.0)
-    assert overfit_verdict(0.05) == ("ok", 1.0)          # boundary: not > 0.05
+    assert overfit_verdict(0.10) == ("penalty", 0.85)    # 0.08 < gap <= 0.15
+    assert overfit_verdict(0.20) == ("reject", 0.0)      # gap > 0.15
+    assert overfit_verdict(0.08) == ("ok", 1.0)          # boundary: not > 0.08
 
 
 # --------------------------------------------------------------------------- #
@@ -65,7 +66,7 @@ def test_analyze_pair_ok():
 
 
 def test_analyze_pair_penalty_and_reject():
-    assert analyze_pair(_result(0.85), _result(0.77)).verdict == "penalty"   # gap 0.08
+    assert analyze_pair(_result(0.85), _result(0.75)).verdict == "penalty"   # gap 0.10
     r = analyze_pair(_result(0.90), _result(0.72))
     assert r.verdict == "reject" and r.penalty_factor == 0.0                 # gap 0.18
 

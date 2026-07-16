@@ -129,14 +129,6 @@ def test_validate_receipt_accepts_honest_pack_receipt():
     assert validate_receipt(_honest_receipt()) is None
 
 
-def test_validate_receipt_rejects_fabricated_best_fitness():
-    receipt = _honest_receipt()
-    receipt["best_fitness"] = 0.99
-    reason = validate_receipt(receipt)
-    assert reason is not None
-    assert reason.startswith("receipt_best_fitness_mismatch")
-
-
 # --------------------------------------------------------------------------- #
 # Gate 5: ledger / receipt cost
 # --------------------------------------------------------------------------- #

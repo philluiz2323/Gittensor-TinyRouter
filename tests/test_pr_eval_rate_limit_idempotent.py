@@ -68,7 +68,7 @@ def test_prior_pr_plus_same_pr_rerun_counts_only_the_prior():
     # but it is the prior submission doing it, not PR 42's own recorded attempt.
     now = time.time()
     lb = {"benchmarks": {"math500": {"attempts": [
-        {"miner": "alice", "pr": 40, "timestamp": _stamp(now - 2 * 86400)},
+        {"miner": "alice", "pr": 40, "timestamp": _stamp(now - 0.5 * 86400)},
         {"miner": "alice", "pr": 42, "timestamp": _stamp(now - 3600)},
     ]}}}
     assert pr_eval._check_rate_limit("alice", "math500", lb, current_pr=42) is not None

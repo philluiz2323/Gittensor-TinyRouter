@@ -7,6 +7,7 @@ PRs, non-monotone timestamps, stale updated_at) and the report renderer.
 """
 import copy
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
@@ -18,6 +19,7 @@ from trinity.submission.leaderboard import (
 
 _T0 = "2026-07-05T00:00:00Z"
 _T1 = "2026-07-05T01:00:00Z"
+_T0_EPOCH = datetime.strptime(_T0, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
 
 
 def _clean() -> dict:
@@ -153,7 +155,7 @@ def test_report_renders_frontier_and_rate_status():
     md = leaderboard_report(lb)
     assert "Leaderboard status" in md and "math500" in md and "alice (#42)" in md
     assert "Rate-limit status" not in md            # omitted without now=
-    now = 1783382400.0 + 3 * 86400                  # a few days after _T0
+    now = _T0_EPOCH + 0.5 * 86400                   # half a day after _T0 (inside the 1-day window)
     md2 = leaderboard_report(lb, now=now)
     assert "Rate-limit status" in md2 and "alice: 1" in md2
 
