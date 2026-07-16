@@ -56,7 +56,7 @@ python scripts/pack_submission.py \
     --miner-name your-name --benchmark composite
 
 # 4. Submit — open a PR with submissions/your-name/1/
-# 5. Earn TAO if you beat the king by ≥ 2 points 🏆
+# 5. The bot auto-checks your gates (~30s). If passed, earn TAO 🏆
 ```
 
 > **Full walkthrough:** [`docs/REPRODUCTION_GUIDE.md`](docs/REPRODUCTION_GUIDE.md)
@@ -70,7 +70,7 @@ python scripts/pack_submission.py \
 | **Same pool** | All miners route to the same three models. Routing skill is what matters. |
 | **One head** | A single head routes across all three benchmarks. No per-benchmark heads. |
 | **Win margin** | Composite must beat the current king by **≥ 0.02** (2 percentage points). |
-| **Rate limit** | 1 submission per week. |
+| **Rate limit** | 1 submission per day. |
 | **Scoring** | 70% cached accuracy · 15% live multi-turn · 10% efficiency · 5% novelty |
 
 <details>
@@ -89,24 +89,24 @@ composite = mean(bench_score_math500, bench_score_mmlu, bench_score_livecodebenc
 - **Live accuracy (15%):** 20 questions through the full Thinker→Worker→Verifier loop with real API calls.
 - **Efficiency (10%):** Fewer turns per correct answer = higher score.
 - **Novelty (5%):** Making different routing decisions from the current king.
-- **Overfit gate:** Eval−audit accuracy gap > 10% = hard reject. > 5% = 0.85× penalty.
+- **Overfit gate:** Eval−audit accuracy gap > 15% = hard reject. > 8% = 0.85× penalty.
 
 Full details: [`docs/EVALUATION_PIPELINE.md`](docs/EVALUATION_PIPELINE.md)
 </details>
 
 <details>
-<summary><b>Anti-cheat gates (8)</b></summary>
+<summary><b>Pre-eval gates (auto-checked by bot)</b></summary>
 
-| # | Gate | Catches |
+When you open a PR, the submission bot automatically runs 4 offline gates within ~30 seconds. If any fails, the PR is auto-closed with the reason.
+
+| # | Gate | What it checks |
 |---|---|---|
-| 1 | Rate limit | Submission flooding (1/week) |
-| 2 | Weight validation | NaN/Inf/degenerate heads |
-| 3 | Duplicate detection | Copied heads (cosine ≥ 0.999) |
-| 4 | Receipt plausibility | Fabricated training (cost < $15, flat fitness) |
-| 5 | Ledger verification | Forged cost (hash-chain check) |
-| 6 | Schema validation | Malformed receipt |
-| 7 | Theta integrity | Pack/unpack mismatch |
-| 8 | Overfit rejection | Eval−audit gap > 10% |
+| 1 | Rate limit | ≤ 1 submission per day per miner |
+| 2 | Weight sanity | Correct shape `(6, 1024)` + `(7168,)`, no NaN/Inf, not all-zeros |
+| 3 | Duplicate detection | Cosine similarity < 0.99 vs all prior submissions + current king |
+| 4 | Receipt | Cost > $0 and > 2 fitness entries (≥ 3 training generations) |
+
+Gate 5 (overfit check) runs during the full evaluation by the maintainer.
 </details>
 
 ## Baselines — what you're beating
