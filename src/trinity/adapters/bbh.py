@@ -133,22 +133,31 @@ def build_bbh_prompt(question: str, answer_type: str) -> str:
 # --------------------------------------------------------------------------- #
 # Scoring (pure text; no execution)
 # --------------------------------------------------------------------------- #
-_ANSWER_LEAD = re.compile(r"(?:final\s+)?answer\s*(?:is|:)\s*(.+)", re.IGNORECASE | re.DOTALL)
+#: Matches only the ``"answer is"`` / ``"answer:"`` LEAD, deliberately WITHOUT a
+#: greedy ``(.+)`` capture: a ``(.+)`` under ``DOTALL`` consumes to end-of-string, so
+#: ``finditer`` yields a single first-lead match and the intended "take the last lead"
+#: silently reads the chain-of-thought instead (#327/#340). Locating each lead
+#: separately lets the caller slice the text after the *last* one.
+_ANSWER_LEAD = re.compile(r"(?:final\s+)?answer\s*(?:is\s*:?|:)\s*", re.IGNORECASE)
 
 
 def _final_answer_segment(text: str) -> str:
     """Pull the answer portion out of a (possibly chatty) exact-match output.
 
-    Prefers the text after an explicit ``"answer is"`` / ``"answer:"`` lead; else the
-    last non-empty line (final answers come last). Returns ``""`` for empty input.
+    Prefers the text after the **last** explicit ``"answer is"`` / ``"answer:"`` lead
+    (final answers come last), skipping a trailing lead with no content after it; else
+    the last non-empty line. Returns ``""`` for empty input.
     """
     if not text:
         return ""
-    matches = list(_ANSWER_LEAD.finditer(text))
-    m = matches[-1] if matches else None
-    seg = m.group(1) if m else next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
-    # Keep only the first line of the captured segment (the answer proper).
-    return seg.strip().splitlines()[0].strip() if seg.strip() else ""
+    for lead in reversed(list(_ANSWER_LEAD.finditer(text))):
+        after = text[lead.end():].strip()
+        if after:
+            first = after.splitlines()[0].strip()
+            if first:
+                return first
+    last_line = next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
+    return last_line.strip()
 
 
 #: Bracket characters a ``dyck_languages`` answer is composed of. Such an answer is
