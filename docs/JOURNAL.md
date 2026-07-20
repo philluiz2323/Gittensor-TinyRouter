@@ -57,6 +57,28 @@ left inconsistent.
 (`^\s*(?:#+\s*|\*\*)...`), mirroring the enhancement hints, so only true header lines bound a
 **Follow-up:** none.
 
+## 2026-07-15 — HERO `_answers_agree` ignored `livecodebench_v6` alias (twin of #314/#333)  #mistake #finding
+**Context:** after the merged `ensemble.answers_agree` alias fix (#314 / #333), auditing the
+HERO training path it claims to mirror (`fitness._answers_agree` / `hero_quality`).
+**Expected:** agreement on the frozen v6 adapter identity (`benchmark="livecodebench_v6"`)
+uses code extraction, same as bare `livecodebench` and the eval graders
+(`has_answer` / `score_text` already call `resolve_benchmark`).
+**Actual:** `_answers_agree` only did `.strip().lower()`, so `livecodebench_v6` was not in
+`CODE_BENCHMARKS` and fell through to full-text equality. Turns with the same extracted
+code but different wrapping prose (normal multi-turn solver behavior) were treated as
+disagreement → `hero_quality` under-ranked consistent trajectories while final scoring
+stayed correct.
+**Root cause:** the ensemble copy was patched; the original HERO predicate was not. The
+docstring even says ensemble mirrors HERO (#139), so the leftover was easy to miss.
+**Fix / decision:** `_answers_agree` now calls `reward.resolve_benchmark(benchmark)` before
+family membership. Regression tests: `test_answers_agree_resolves_livecodebench_v6_alias`
+and `test_hero_quality_livecodebench_v6_alias_uses_code_extract` (same code, different
+prose → agree / `hero_quality == 1.0` on v6).
+**Follow-up:** `fugu/workflow.format_hint` still raw-lowercases; v6 may get a math hint
+instead of a code-fence hint — separate, lower-impact leftover.
+
+---
+
 ## 2026-07-13 — verified_ledger_total_usd crashed on a non-UTF-8 ledger instead of returning None  #mistake #finding
 **Context:** auditing the offline cost-accounting path (`llm/openrouter_pricing.py`) that feeds
 `scripts/cost_report.py --ledger` and `pack_submission._estimate_cost()` (the receipt cost a

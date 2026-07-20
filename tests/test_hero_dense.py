@@ -67,6 +67,17 @@ def test_hero_quality_code_self_consistency():
     assert hero_quality(_traj("livecodebench", [same, other], same)) == pytest.approx(0.5)
 
 
+def test_hero_quality_livecodebench_v6_alias_uses_code_extract():
+    # v6 adapter freezes benchmark="livecodebench_v6". Without resolve_benchmark,
+    # HERO falls through to full-text match and ranks consistent solvers low when
+    # wrapping prose differs between turns (normal multi-turn behavior).
+    a = "First attempt:\n```python\ndef f():\n    return 1\n```"
+    b = "Cleaned up:\n```python\ndef f():\n    return 1\n```"
+    assert hero_quality(_traj("livecodebench_v6", [a, b], b)) == 1.0
+    other = "```python\ndef f():\n    return 2\n```"
+    assert hero_quality(_traj("livecodebench_v6", [a, other], a)) == pytest.approx(0.5)
+
+
 def test_hero_quality_in_unit_interval():
     for tt in (["Answer: A", "Answer: B", "Answer: C"], ["Answer: D"], [r"\boxed{1}", r"\boxed{2}"]):
         q = hero_quality(_traj("mmlu", tt, tt[0]))

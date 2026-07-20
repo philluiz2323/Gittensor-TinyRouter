@@ -162,6 +162,18 @@ def test_answers_agree_unknown_benchmark_uses_stripped_text_match():
     assert F._answers_agree("no_such_benchmark", "a", "b") is False
 
 
+def test_answers_agree_resolves_livecodebench_v6_alias():
+    # Twin of the ensemble.answers_agree alias fix (#314/#333): same extracted
+    # code under different prose must agree on the frozen v6 identity, not fall
+    # through to full-text equality.
+    a = "Here is my solution:\n```python\ndef f():\n    return 1\n```"
+    b = "Final answer:\n```python\ndef f():\n    return 1\n```"
+    other = "```python\ndef f():\n    return 2\n```"
+    assert F._answers_agree("livecodebench", a, b) is True
+    assert F._answers_agree("livecodebench_v6", a, b) is True
+    assert F._answers_agree("livecodebench_v6", a, other) is False
+
+
 # --------------------------------------------------------------------------- #
 # evaluate_population
 # --------------------------------------------------------------------------- #
