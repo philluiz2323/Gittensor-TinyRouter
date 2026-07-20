@@ -70,6 +70,14 @@ from trinity.analysis.union_oracle import (
     relative_error_reduction,
     union_oracle,
 )
+from trinity.analysis.transfer import (
+    HELD_OUT,
+    IN_DISTRIBUTION,
+    BenchmarkMargin,
+    CohortSummary,
+    TransferSummary,
+    classify,
+)
 from trinity.analysis.grader_audit import (
     BenchmarkAudit,
     ItemAudit,
@@ -131,4 +139,10 @@ __all__ = [
     "audit",
     "audit_item",
     "benchmark_kind",
+    "HELD_OUT",
+    "IN_DISTRIBUTION",
+    "BenchmarkMargin",
+    "CohortSummary",
+    "TransferSummary",
+    "classify",
 ]
