@@ -554,6 +554,10 @@ def normalize_math_answer(ans: str | None) -> str:
     s = s.strip()
     if s.startswith("="):
         s = s[1:].strip()
+    # A "solve for x" answer often carries the variable: "x=5" / "x = 5" -> "5".
+    # Only a SINGLE leading letter followed by "=" is removed, so multi-char tokens
+    # ("log=2") and equations whose left side matters are left untouched (issue #348).
+    s = re.sub(r"^[a-zA-Z]\s*=\s*", "", s).strip()
     # Strip a single outer pair of \{ \} or { }. The capture is LAZY so the
     # trailing optional backslash can consume a "\}" escape; a greedy ".*" eats it
     # first, leaving a stray backslash ("\{1,2\}" -> "1,2\") that fails to match a
@@ -697,8 +701,9 @@ def _sympy_equal(a: str, b: str) -> bool:
     # (e.g. "005" vs "5", or "05" vs "09").  AIME-style zero-padded
     # answers should be compared as strings, not as numeric values.
     # Only applies to all-digit strings to preserve "0.5" etc.
-    if (a[0] == "0" and len(a) > 1 and a.isdigit()) or \
-       (b[0] == "0" and len(b) > 1 and b.isdigit()):
+    # len first so empty strings do not IndexError.
+    if (len(a) > 1 and a[0] == "0" and a.isdigit()) or \
+       (len(b) > 1 and b[0] == "0" and b.isdigit()):
         return False
     try:  # guarded import: local machine may lack sympy
         import sympy
