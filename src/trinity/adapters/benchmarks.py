@@ -98,12 +98,26 @@ class LiveCodeBenchAdapter(_BuiltinAdapter):
     _TASK_TYPE = TaskType.CODE
 
 
+class AimeAdapter(_BuiltinAdapter):
+    """AIME: competition math, integer answer graded by the shared math extractor.
+
+    The harder math benchmark ``ROADMAP.md`` asks for (more model variance -> more
+    routing headroom) and the one ``docs/SPEC.md`` §6.2 lists for held-out transfer.
+    ``reward.MATH_BENCHMARKS`` already grades ``aime``, so this adds no scoring
+    behaviour — only the data path that was missing.
+    """
+
+    name = "aime"
+    _TASK_TYPE = TaskType.MATH
+
+
 #: The concrete adapter classes, registered under their ``name``.
 _BUILTIN_ADAPTERS: tuple[type[_BuiltinAdapter], ...] = (
     Math500Adapter,
     MmluAdapter,
     GpqaAdapter,
     LiveCodeBenchAdapter,
+    AimeAdapter,
 )
 
 

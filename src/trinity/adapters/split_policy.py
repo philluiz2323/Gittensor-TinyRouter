@@ -44,6 +44,16 @@ _SPLIT_ALIASES: dict[str, dict[str, str]] = {
         "train": "test",
         "training": "test",
     },
+    # AIME publishes a single upstream ``train`` split (AI-MO/aimo-validation-aime,
+    # Maxwell-Jia/AIME_2024). Logical ``test`` must read it too, or the loader finds no
+    # rows and silently serves the 2-item toy set — the failure mode fixed for MMLU (#35),
+    # MMLU-Pro (#50), GPQA (#95) and SWE-bench (#196). ``select_holdout`` then carves the
+    # rows into disjoint train/test subsets so the two never overlap.
+    "aime": {
+        "train": "train",
+        "training": "train",
+        "test": "train",
+    },
 }
 
 #: Seed for the deterministic holdout partition. Fixed: changing it silently
@@ -55,6 +65,7 @@ HOLDOUT_SEED: int = 20260710
 _HOLDOUT_FRACTION: dict[str, float] = {
     "gpqa": 0.25,
     "swebench_verified": 0.25,
+    "aime": 0.25,
 }
 
 #: Logical split names served the held-out rows; every other name gets the rest.

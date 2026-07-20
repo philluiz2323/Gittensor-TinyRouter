@@ -27,7 +27,7 @@ from trinity.types import Task
 from .split_policy import resolve_split, select_holdout, warn_on_toy_fallback
 
 #: Benchmarks with a dedicated raw loader in this module.
-SUPPORTED_BENCHMARKS: tuple[str, ...] = ("math500", "mmlu", "gpqa", "livecodebench")
+SUPPORTED_BENCHMARKS: tuple[str, ...] = ("math500", "mmlu", "gpqa", "livecodebench", "aime")
 
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
 
@@ -107,6 +107,47 @@ def _load_math500_hf(split: str) -> list[Task] | None:
             )
         )
     return tasks or None
+
+def _load_aime_hf(split: str) -> list[Task] | None:
+    """AIME loader. answer = the competition's integer answer (0-999), as published.
+
+    AIME is the harder math benchmark ``ROADMAP.md`` asks for and ``docs/SPEC.md`` §6.2
+    lists in the held-out transfer set; ``reward.MATH_BENCHMARKS`` already grades ``aime``,
+    so scoring is the shared boxed/last-number extractor — this only supplies the data.
+
+    The answer is stored exactly as the dataset publishes it and is NOT re-padded or
+    stripped: ``math_equal`` deliberately treats a leading zero as significant for this
+    benchmark (AIME's ``000``-``999`` range), so rewriting the gold string here would
+    silently change what grades correct.
+    """
+    ds = _try_load_hf("AI-MO/aimo-validation-aime", split=split or "train")
+    src = "AI-MO/aimo-validation-aime"
+    if ds is None:
+        ds = _try_load_hf("Maxwell-Jia/AIME_2024", split=split or "train")
+        src = "Maxwell-Jia/AIME_2024"
+    if ds is None:
+        return None
+    tasks: list[Task] = []
+    for i, row in enumerate(ds):
+        problem = _row_get(row, "problem", "Problem", "question", default="")
+        answer = _row_get(row, "answer", "Answer", default=None)
+        if not problem or answer is None or str(answer).strip() == "":
+            continue
+        tasks.append(
+            Task(
+                task_id=f"aime-{i}",
+                benchmark="aime",
+                prompt=str(problem),
+                answer=str(answer).strip(),
+                meta={
+                    "source": src,
+                    "url": _row_get(row, "url", "link"),
+                    "year": _row_get(row, "year"),
+                },
+            )
+        )
+    return tasks or None
+
 
 def _load_mmlu_hf(split: str) -> list[Task] | None:
     """MMLU loader. answer = correct option LETTER ("A".."D")."""
@@ -357,6 +398,42 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy"},
             ),
         ]
+    if benchmark == "aime":
+        # AIME answers are integers in 0-999. Kept unpadded so they grade the way
+        # ``math_equal``'s zero-pad rule expects (a padded gold would reject a plain
+        # integer answer, and vice versa).
+        return [
+            Task(
+                task_id="aime-toy-0",
+                benchmark="aime",
+                prompt=(
+                    "Find the number of ordered pairs of positive integers (a, b) with "
+                    "a + b = 5. Give the final answer in \\boxed{}."
+                ),
+                answer="4",
+                meta={"source": "toy"},
+            ),
+            Task(
+                task_id="aime-toy-1",
+                benchmark="aime",
+                prompt=(
+                    "Let N be the remainder when 2^10 is divided by 1000. Find N. "
+                    "Give the final answer in \\boxed{}."
+                ),
+                answer="24",
+                meta={"source": "toy"},
+            ),
+            Task(
+                task_id="aime-toy-2",
+                benchmark="aime",
+                prompt=(
+                    "Find the sum of the digits of 999. Give the final answer in "
+                    "\\boxed{}."
+                ),
+                answer="27",
+                meta={"source": "toy"},
+            ),
+        ]
     if benchmark == "mmlu":
         return [
             Task(
@@ -462,6 +539,7 @@ _HF_LOADERS = {
     "mmlu": _load_mmlu_hf,
     "gpqa": _load_gpqa_hf,
     "livecodebench": _load_livecodebench_hf,
+    "aime": _load_aime_hf,
 }
 
 def load_split(
