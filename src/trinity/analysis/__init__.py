@@ -86,6 +86,7 @@ from trinity.analysis.grader_audit import (
     audit_item,
     benchmark_kind,
 )
+<<<<<<< HEAD
 from trinity.analysis.union_diagnostics import (
     UnionModelSampling,
     UnionModelSelective,
@@ -93,6 +94,13 @@ from trinity.analysis.union_diagnostics import (
     UnionSelectiveSummary,
     union_sampling,
     union_selective,
+=======
+from trinity.analysis.oracle_column import (
+    Estimate,
+    OracleColumns,
+    from_oracle_report,
+    index_by_benchmark,
+>>>>>>> f319b1f (feat(results_table): oracle / headroom / gap-closed columns (ORACLE §7 item 3))
 )
 
 __all__ = [
@@ -159,4 +167,8 @@ __all__ = [
     "UnionSelectiveSummary",
     "union_sampling",
     "union_selective",
+    "Estimate",
+    "OracleColumns",
+    "from_oracle_report",
+    "index_by_benchmark",
 ]
