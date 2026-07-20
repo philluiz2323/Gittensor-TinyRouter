@@ -5,17 +5,22 @@
 both strictly **per-benchmark**. Neither aggregates a miner's results **across** benchmarks
 into an overall ranking, so there is no answer to "who is winning the competition overall?"
 
-This module computes that. For each miner it takes their best **merged** score on each
-benchmark from the history ledger, then ranks miners by the **equal-weighted** mean over
-all benchmarks — each benchmark counts once and a benchmark a miner never entered counts as
-``0.0``, so an overall leader must be strong on *every* benchmark, not just top one. (Same
-equal-weight-per-benchmark philosophy the union-oracle and results-table summaries use, so
-a specialist cannot outrank a generalist by cherry-picking a single board.)
+This module computes that. The competition is **composite** (``pr_eval`` evaluates one
+head on every benchmark and crowns a single king on the mean score), so every merged win
+is written to ``competition.history`` with a ``per_benchmark`` score breakdown — the
+per-benchmark ``benchmarks.*`` subtree only carries static baselines/ceilings and the
+rate-limit ledger, and its ``history`` is **never** populated. For each miner this takes
+their best **merged** score on each benchmark from ``competition.history[*].per_benchmark``,
+then ranks miners by the **equal-weighted** mean over all benchmarks — each benchmark counts
+once and a benchmark a miner never scored counts as ``0.0``, so an overall leader must be
+strong on *every* benchmark, not just the top one. (Same equal-weight-per-benchmark
+philosophy the union-oracle and results-table summaries use, so a specialist cannot outrank
+a generalist by cherry-picking a single board.)
 
 It reuses :func:`trinity.leaderboard.load_leaderboard` so it can't drift from the schema,
-tolerates a partially-tampered record (a non-list ``history``, a non-dict entry) without
-crashing, and degrades to an empty ranking on the seed leaderboard (zero miners). Read-only,
-pure stdlib — no torch, no network.
+tolerates a partially-tampered record (a non-dict ``competition``, a non-list ``history``,
+a non-dict entry, a non-dict ``per_benchmark``) without crashing, and degrades to an empty
+ranking on the seed leaderboard (zero miners). Read-only, pure stdlib — no torch, no network.
 """
 from __future__ import annotations
 
@@ -32,6 +37,9 @@ __all__ = [
     "load_standings",
     "render",
 ]
+
+
+_TOL = 1e-9
 
 
 def _is_num(x: Any) -> TypeGuard[float]:
@@ -88,37 +96,59 @@ class Standings:
 
 
 def compute_standings(leaderboard: Mapping[str, Any]) -> Standings:
-    """Rank miners across benchmarks by equal-weighted best-merged score.
+    """Rank miners across benchmarks from the composite ``competition.history``.
 
-    A miner's per-benchmark score is the max score over their ``merged`` history wins on
-    that benchmark; a benchmark they never won counts as ``0.0`` in the equal-weighted
-    overall. Ranking is by ``overall`` desc, then benchmarks-led desc, then miner name.
+    A miner's per-benchmark score is the max over their ``merged`` wins'
+    ``per_benchmark`` breakdowns; a benchmark they never scored counts as ``0.0`` in the
+    equal-weighted overall. ``benchmarks_led`` is the number of boards on which the miner
+    *uniquely* holds the top score. Ranking is by ``overall`` desc, then benchmarks-led
+    desc, then miner name.
     """
-    benches = leaderboard.get("benchmarks", {})
-    if not isinstance(benches, dict):
+    comp = leaderboard.get("competition")
+    if not isinstance(comp, dict):
         return Standings([], [])
-    bench_names = sorted(b for b, e in benches.items() if isinstance(e, dict))
 
     per_miner: dict[str, dict[str, float]] = {}
-    kings: dict[str, Any] = {}
-    for name in bench_names:
-        entry = benches[name]
-        kings[name] = entry.get("best_miner")
-        for h in _as_list(entry.get("history")):
-            if not isinstance(h, dict) or h.get("merged") is not True:
+    seen_benches: set[str] = set()
+    for h in _as_list(comp.get("history")):
+        if not isinstance(h, dict) or h.get("merged") is not True:
+            continue
+        miner = h.get("miner")
+        per_benchmark = h.get("per_benchmark")
+        if miner is None or not isinstance(per_benchmark, dict):
+            continue
+        best = per_miner.setdefault(str(miner), {})
+        for bench, score in per_benchmark.items():
+            if not _is_num(score):
                 continue
-            miner, score = h.get("miner"), h.get("score")
-            if miner is None or not _is_num(score):
-                continue
-            best = per_miner.setdefault(str(miner), {})
-            if name not in best or float(score) > best[name]:
-                best[name] = float(score)
+            b = str(bench)
+            seen_benches.add(b)
+            if b not in best or float(score) > best[b]:
+                best[b] = float(score)
+
+    # Benchmark set: the competition's declared benchmarks (so a board no one has scored
+    # still appears as a column), unioned with any seen in history.
+    declared = comp.get("benchmarks")
+    if isinstance(declared, list):
+        seen_benches |= {str(b) for b in declared}
+    bench_names = sorted(seen_benches)
+
+    # Per-board leader: the miner who UNIQUELY holds the top score (a tie credits no one).
+    bench_leader: dict[str, str] = {}
+    for b in bench_names:
+        holders = [(sc[b], m) for m, sc in per_miner.items() if b in sc]
+        if not holders:
+            continue
+        top = max(s for s, _ in holders)
+        tops = [m for s, m in holders if abs(s - top) <= _TOL]
+        if len(tops) == 1:
+            bench_leader[b] = tops[0]
 
     n = len(bench_names)
     standings = []
     for miner, per in per_miner.items():
         overall = sum(per.get(b, 0.0) for b in bench_names) / n if n else 0.0
-        led = sum(1 for b in bench_names if kings.get(b) == miner)
+        led = sum(1 for b in bench_names if bench_leader.get(b) == miner)
         standings.append(MinerStanding(miner, dict(per), overall, len(per), led))
 
     standings.sort(key=lambda s: (-s.overall, -s.benchmarks_led, s.miner))
