@@ -154,7 +154,7 @@ def novelty_report(
     """
     if reference is None:
         return NoveltyReport(
-            n_questions=len(head), n_agree=0, agreement_rate=1.0 - neutral,
+            n_questions=len(head), n_agree=int(round((1.0 - neutral) * len(head))), agreement_rate=1.0 - neutral,
             novelty=neutral, differing_indices=[], switched_from_to={},
         )
 
