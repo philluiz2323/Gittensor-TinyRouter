@@ -453,7 +453,7 @@ def _looks_structured_answer(s: str) -> bool:
     return False
 
 
-_FONT_COMMANDS = ("text", "mathrm", "mathbf", "mathit", "mathsf", "mathtt", "boldsymbol")
+_FONT_COMMANDS = ("textbf", "textit", "textrm", "emph", "text", "mathrm", "mathbf", "mathit", "mathsf", "mathtt", "boldsymbol")
 
 
 def _unwrap_font_commands(s: str) -> str:
