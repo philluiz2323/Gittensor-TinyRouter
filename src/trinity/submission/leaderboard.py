@@ -18,6 +18,19 @@ non-monotone timestamps) and never modifies anything. It **reuses**
 ``gates.parse_utc_timestamp`` / ``gates.rate_limit_entries`` and the ``RATE_LIMIT_*``
 constants, so it can never drift from the gate that trusts the file. Pure python — no
 torch, no network.
+
+The file carries **two** state trees and the verifier now covers both. Besides the
+per-benchmark ``benchmarks.*`` frontier, ``pr_eval._update_leaderboard`` writes the
+authoritative single-king record to ``competition`` (``best_composite_score`` and the
+``best_*`` pointers, appended to ``competition.history``), and ``pr_eval`` compares
+**every** APPROVE/REJECT against ``competition.best_composite_score`` — so that one
+field decides the whole contest. It previously had *zero* integrity checking: an edited
+``best_composite_score`` locked out honest challengers while ``verify_leaderboard``
+still returned "clean". :func:`_verify_competition` closes that, grounded in the writer:
+composite = mean of ``best_per_benchmark`` (``pr_eval.py`` composite rule), each new king
+clears the previous by ``win_margin`` (the APPROVE rule), and the ``best_*`` pointers
+match the winning ``history`` entry — plus the cross-subtree rule that a crowned win must
+have a recorded rate-limit attempt.
 """
 from __future__ import annotations
 
@@ -172,6 +185,137 @@ def _verify_bench(name: str, entry: Any, problems: list[str]) -> None:
                 )
 
 
+#: Tolerance for the composite=mean and win-margin checks. The writer rounds the
+#: composite to 4 decimals while storing the per-benchmark scores raw, so a legitimate
+#: record can differ from the exact mean by up to ~5e-5; 5e-4 stays well clear of that
+#: rounding while still catching any meaningful inflation / illegal crowning.
+_COMP_TOL = 5e-4
+
+
+def _verify_competition(comp: Any, benches: Mapping[str, Any], problems: list[str]) -> None:
+    """Integrity-check the ``competition`` king record (the field every APPROVE reads).
+
+    Grounded in ``pr_eval._update_leaderboard`` / the APPROVE rule: ``best_composite_score``
+    is the mean of ``best_per_benchmark`` and equals the max ``history`` score; the
+    ``best_*`` pointers match the winning history entry; each successive crowned king
+    clears the previous by ``win_margin``; and every crowned win has a recorded rate-limit
+    attempt under ``benchmarks.composite``.
+    """
+    tag = "competition"
+    if not isinstance(comp, dict):
+        problems.append(f"{tag}: not a JSON object")
+        return
+
+    # Score fields in [0, 1]. best_composite_score is THE contested number — always
+    # written (seed 0.0), so a missing/non-numeric value is itself a tamper signal.
+    bcs = comp.get("best_composite_score")
+    if not _in_unit(bcs):
+        problems.append(f"{tag}.best_composite_score {bcs!r} not a number in [0, 1]")
+    for key in ("baseline_best_single", "baseline_random"):
+        v = comp.get(key)
+        if v is not None and not _in_unit(v):
+            problems.append(f"{tag}.{key} {v!r} not a number in [0, 1]")
+    wm = comp.get("win_margin")
+    if wm is not None and not _in_unit(wm):
+        problems.append(f"{tag}.win_margin {wm!r} not a number in [0, 1]")
+    wm_num = float(wm) if _is_num(wm) and _in_unit(wm) else None
+
+    # best_per_benchmark values in [0, 1]; the composite must be their mean (writer sets
+    # composite = mean(per_benchmark scores), then rounds to 4dp).
+    raw_bpb = comp.get("best_per_benchmark")
+    if raw_bpb is not None and not isinstance(raw_bpb, dict):
+        problems.append(f"{tag}.best_per_benchmark is not a JSON object")
+    bpb = raw_bpb if isinstance(raw_bpb, dict) else {}
+    per_vals: list[float] = []
+    for k, v in bpb.items():
+        if not _in_unit(v):
+            problems.append(f"{tag}.best_per_benchmark[{k!r}] {v!r} not a number in [0, 1]")
+        elif _is_num(v):
+            per_vals.append(float(v))
+    if bpb and _is_num(bcs) and len(per_vals) == len(bpb):
+        mean = sum(per_vals) / len(per_vals)
+        if abs(float(bcs) - mean) > _COMP_TOL:
+            problems.append(
+                f"{tag}.best_composite_score {bcs} != mean(best_per_benchmark) {mean:.4f} "
+                f"(inflated composite?)"
+            )
+
+    # history: required fields, merged, valid score, non-decreasing time, margin-cleared.
+    raw_history = comp.get("history")
+    if raw_history is not None and not isinstance(raw_history, list):
+        problems.append(f"{tag}.history is not a JSON array")
+    history = _as_list(raw_history)
+    max_score: float | None = None
+    max_entry: Mapping[str, Any] | None = None
+    prev_ts: float | None = None
+    prev_score: float | None = None
+    for i, h in enumerate(history):
+        if not isinstance(h, dict):
+            problems.append(f"{tag}.history[{i}]: not a JSON object")
+            continue
+        for f in _HISTORY_FIELDS:
+            if f not in h:
+                problems.append(f"{tag}.history[{i}] missing '{f}'")
+        if h.get("merged") is not True:
+            problems.append(f"{tag}.history[{i}] is not merged=true")
+        sc = h.get("score")
+        if _is_num(sc):
+            if not _in_unit(sc):
+                problems.append(f"{tag}.history[{i}].score {sc} not in [0, 1]")
+            if max_score is None or float(sc) > max_score:
+                max_score, max_entry = float(sc), h
+            # Each crowned king must clear the previous by >= win_margin (the APPROVE rule);
+            # a history that jumps by less never legitimately crowned.
+            if prev_score is not None and wm_num is not None and \
+                    float(sc) + _COMP_TOL < prev_score + wm_num:
+                problems.append(
+                    f"{tag}.history[{i}].score {sc} does not clear the previous king "
+                    f"{prev_score} by win_margin {wm_num} (illegal crowning?)"
+                )
+            prev_score = float(sc)
+        ts = parse_utc_timestamp(h.get("timestamp", ""))
+        if ts is None:
+            problems.append(f"{tag}.history[{i}] bad timestamp {h.get('timestamp')!r}")
+        elif prev_ts is not None and ts + _TOL < prev_ts:
+            problems.append(f"{tag}.history[{i}] timestamp goes backwards")
+        if ts is not None:
+            prev_ts = ts
+
+    # best_* must equal the winning (max-score) history entry; empty history -> unclaimed.
+    if history:
+        if _is_num(bcs) and max_score is not None and abs(float(bcs) - max_score) > _TOL:
+            problems.append(
+                f"{tag}.best_composite_score {bcs} != max history score {max_score} (tampered?)"
+            )
+        if max_entry is not None:
+            for lb_key, h_key in (("best_miner", "miner"), ("best_generation", "generation"),
+                                  ("best_pr", "pr")):
+                if comp.get(lb_key) != max_entry.get(h_key):
+                    problems.append(
+                        f"{tag}.{lb_key} {comp.get(lb_key)!r} != winning history {h_key} "
+                        f"{max_entry.get(h_key)!r}"
+                    )
+    elif comp.get("best_miner") is not None:
+        problems.append(f"{tag}.best_miner {comp.get('best_miner')!r} set but history is empty")
+
+    # Cross-subtree: pr_eval records the composite rate-limit attempts under
+    # benchmarks.composite, so a crowned win with no matching attempt is a rate-limit
+    # bypass. Guarded on that ledger existing (else vacuous), mirroring the per-benchmark
+    # history-vs-attempts check.
+    composite_bench = benches.get("composite") if isinstance(benches, dict) else None
+    if isinstance(composite_bench, dict) and isinstance(composite_bench.get("attempts"), list):
+        att_pairs = {
+            (a.get("miner"), a.get("pr"))
+            for a in composite_bench["attempts"] if isinstance(a, dict)
+        }
+        for i, h in enumerate(history):
+            if isinstance(h, dict) and (h.get("miner"), h.get("pr")) not in att_pairs:
+                problems.append(
+                    f"{tag}.history[{i}] win ({h.get('miner')!r}, pr {h.get('pr')}) missing "
+                    f"from benchmarks.composite attempts ledger (rate-limit bypass?)"
+                )
+
+
 def verify_leaderboard(lb: Mapping[str, Any]) -> list[str]:
     """Cross-check a parsed ``leaderboard.json`` for integrity. Empty list = clean.
 
@@ -196,6 +340,19 @@ def verify_leaderboard(lb: Mapping[str, Any]) -> list[str]:
                         ts = parse_utc_timestamp(e.get("timestamp", ""))
                         if ts is not None and (newest is None or ts > newest):
                             newest = ts
+
+    # The competition king record is the authoritative single-king state and is only
+    # present on the real file; skip silently when absent so a benchmarks-only leaderboard
+    # (older fixtures / partial records) is still judged clean.
+    comp = lb.get("competition")
+    if comp is not None:
+        _verify_competition(comp, benches, problems)
+        if isinstance(comp, dict):
+            for e in _as_list(comp.get("history")):
+                if isinstance(e, dict):
+                    ts = parse_utc_timestamp(e.get("timestamp", ""))
+                    if ts is not None and (newest is None or ts > newest):
+                        newest = ts
 
     up = lb.get("updated_at")
     if up is not None:
