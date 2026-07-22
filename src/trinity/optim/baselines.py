@@ -17,10 +17,16 @@ makes its core pure ``numpy`` (like :class:`~trinity.optim.sep_cmaes.SepCMAES` i
 imports no torch and injects the fitness), so the sampler / budget-match / keep-best
 logic is unit-testable offline exactly as ``sep_cmaes.run`` is.
 
-SFT and REINFORCE (the other two R8 baselines, docs/SPEC.md L420) are intentionally
-**not** implemented here: both are gradient methods that require torch on the head /
-SLM and cannot be validated in a CPU-only environment. They are deferred to a
-follow-up so this module stays fully offline-provable.
+SFT and REINFORCE (the other two R8 baselines, docs/SPEC.md L420) live in their own
+modules — :mod:`trinity.optim.sft` and :mod:`trinity.optim.reinforce` — rather than
+here, because both are gradient methods and this module's contract is to stay pure
+``numpy``. An earlier revision of this docstring deferred them outright on the grounds
+that they "cannot be validated in a CPU-only environment"; that was too strong. Both
+are head-only with the SLM frozen, so their tensors are small, and their update rules
+are exercised on CPU (see ``tests/test_torch_optim_sft.py`` and
+``tests/test_torch_optim_reinforce.py``). What genuinely still needs a GPU is producing
+the *Table 4 numbers* for R8, not the trainers themselves. Both keep torch behind a
+lazy import so ``import trinity.optim`` remains torch-free.
 
 ``RandomSearchTrainer`` subclasses :class:`~trinity.optim.base.BaseTrainer` and
 returns the documented trainer summary; it reuses
