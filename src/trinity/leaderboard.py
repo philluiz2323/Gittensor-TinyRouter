@@ -16,6 +16,13 @@ questions they actually care about before spending on a training run:
 This module turns the leaderboard into those targets. It is read-only and pure;
 it never touches the scoring path.
 
+The crown itself is **composite**, though: ``pr_eval`` evaluates one head on every
+benchmark and approves a submission only when its **mean** score clears the reigning
+king's ``competition.best_composite_score`` by ``win_margin`` — so the single number a
+miner must actually beat lives in the ``competition`` object, not in any per-benchmark
+row. :func:`summarize_competition` surfaces that composite score-to-beat (the
+per-benchmark ``BenchmarkTarget``\\ s stay useful as the per-board reference points).
+
 Pure / deterministic / no network / no GPU / no torch. Only the stdlib.
 """
 from __future__ import annotations
@@ -25,7 +32,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-__all__ = ["BenchmarkTarget", "load_leaderboard", "summarize_targets"]
+__all__ = [
+    "BenchmarkTarget",
+    "CompetitionTarget",
+    "load_leaderboard",
+    "summarize_targets",
+    "summarize_competition",
+]
+
+_TOL = 1e-9
 
 
 def _as_float(x: Any, default: float = 0.0) -> float:
@@ -108,6 +123,55 @@ class BenchmarkTarget:
         }
 
 
+@dataclass(frozen=True)
+class CompetitionTarget:
+    """The composite score-to-beat — the single number that decides a submission.
+
+    ``pr_eval`` crowns a new king only when a submission's composite (mean-over-benchmark)
+    score clears the reigning ``current_best`` by ``win_margin``, so ``score_to_beat`` is
+    ``current_best + win_margin`` — the minimum composite that would be approved.
+    ``best_per_benchmark`` is the reigning king's per-board breakdown.
+    """
+
+    current_best: float
+    win_margin: float
+    score_to_beat: float
+    king_miner: str | None
+    king_generation: int
+    king_pr: Any
+    best_per_benchmark: dict[str, float]
+    baseline_best_single: float | None
+    baseline_random: float | None
+    benchmarks: list[str]
+
+    @property
+    def has_king(self) -> bool:
+        """True iff someone already holds the composite crown."""
+        return self.king_miner is not None
+
+    @property
+    def reachable(self) -> bool:
+        """True iff ``score_to_beat`` is still <= 1.0 (a perfect score could win)."""
+        return self.score_to_beat <= 1.0 + _TOL
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-serializable view."""
+        return {
+            "current_best": self.current_best,
+            "win_margin": self.win_margin,
+            "score_to_beat": self.score_to_beat,
+            "king_miner": self.king_miner,
+            "king_generation": self.king_generation,
+            "king_pr": self.king_pr,
+            "best_per_benchmark": dict(self.best_per_benchmark),
+            "baseline_best_single": self.baseline_best_single,
+            "baseline_random": self.baseline_random,
+            "benchmarks": list(self.benchmarks),
+            "has_king": self.has_king,
+            "reachable": self.reachable,
+        }
+
+
 def load_leaderboard(path: str | Path) -> dict[str, Any]:
     """Load a leaderboard JSON, returning an empty ``{"benchmarks": {}}`` on failure.
 
@@ -156,3 +220,54 @@ def summarize_targets(leaderboard: Mapping[str, Any]) -> list[BenchmarkTarget]:
         if isinstance(entry, Mapping):
             out.append(_target_from_entry(str(name), entry))
     return out
+
+
+def _clean_per_benchmark(x: Any) -> dict[str, float]:
+    """Coerce a ``{benchmark: score}`` mapping to a clean float dict (drop non-numeric)."""
+    if not isinstance(x, Mapping):
+        return {}
+    out: dict[str, float] = {}
+    for k, v in x.items():
+        if v is None:
+            continue
+        try:
+            out[str(k)] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def summarize_competition(leaderboard: Mapping[str, Any]) -> CompetitionTarget | None:
+    """The composite score-to-beat from the ``competition`` object, or None if absent.
+
+    The crown is composite: a submission is approved only when its mean score clears
+    ``competition.best_composite_score`` by ``win_margin`` (``pr_eval``'s APPROVE rule),
+    so ``score_to_beat = best_composite_score + win_margin``. Returns None when there is
+    no ``competition`` record to read (an older benchmarks-only leaderboard).
+    """
+    comp = leaderboard.get("competition")
+    if not isinstance(comp, Mapping):
+        return None
+    current_best = _as_float(comp.get("best_composite_score"))
+    win_margin = _as_float(comp.get("win_margin"))
+    king = comp.get("best_miner")
+    try:
+        king_gen = int(comp.get("best_generation", 0) or 0)
+    except (TypeError, ValueError):
+        king_gen = 0
+    declared = comp.get("benchmarks")
+    benchmarks = [str(b) for b in declared] if isinstance(declared, list) else []
+    bbs = comp.get("baseline_best_single")
+    br = comp.get("baseline_random")
+    return CompetitionTarget(
+        current_best=current_best,
+        win_margin=win_margin,
+        score_to_beat=current_best + win_margin,
+        king_miner=str(king) if king else None,
+        king_generation=king_gen,
+        king_pr=comp.get("best_pr"),
+        best_per_benchmark=_clean_per_benchmark(comp.get("best_per_benchmark")),
+        baseline_best_single=_as_float(bbs) if bbs is not None else None,
+        baseline_random=_as_float(br) if br is not None else None,
+        benchmarks=benchmarks,
+    )
