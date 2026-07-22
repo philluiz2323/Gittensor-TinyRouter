@@ -3,7 +3,13 @@ from __future__ import annotations
 
 import json
 
-from trinity.leaderboard import load_leaderboard, summarize_targets
+import pytest
+
+from trinity.leaderboard import (
+    load_leaderboard,
+    summarize_competition,
+    summarize_targets,
+)
 
 _REPO_LB = __import__("pathlib").Path(__file__).resolve().parents[1] / "leaderboard.json"
 
@@ -133,7 +139,71 @@ def test_the_repo_leaderboard_parses():
         assert d["benchmark"] == t.benchmark and "remaining" in d
 
 
-if __name__ == "__main__":
-    import pytest
+# ---------------------------------------------------------------------------
+# composite competition target (the score every submission is actually judged on)
+# ---------------------------------------------------------------------------
+def _comp(**over):
+    c = {"benchmarks": ["math500", "mmlu", "livecodebench"], "win_margin": 0.02,
+         "best_composite_score": 0.0, "best_miner": None, "best_generation": 0,
+         "best_pr": None, "best_per_benchmark": {}, "baseline_best_single": None,
+         "baseline_random": None}
+    c.update(over)
+    return {"benchmarks": {}, "competition": c}
 
+
+def test_composite_score_to_beat_is_king_plus_margin():
+    ct = summarize_competition(_comp(
+        best_composite_score=0.85, win_margin=0.02, best_miner="alice",
+        best_generation=3, best_pr=42,
+        best_per_benchmark={"math500": 0.90, "mmlu": 0.90, "livecodebench": 0.75}))
+    assert ct is not None
+    assert ct.current_best == 0.85 and ct.win_margin == 0.02
+    assert ct.score_to_beat == pytest.approx(0.87)          # 0.85 + 0.02 (the APPROVE threshold)
+    assert ct.has_king and ct.king_miner == "alice" and ct.king_pr == 42
+    assert ct.best_per_benchmark["livecodebench"] == 0.75
+    assert ct.reachable
+
+
+def test_seed_competition_has_no_king_and_low_target():
+    ct = summarize_competition(_comp())                     # seed: best 0.0, no king
+    assert ct is not None and not ct.has_king
+    assert ct.score_to_beat == pytest.approx(0.02) and ct.king_miner is None
+
+
+def test_unbeatable_when_target_exceeds_one():
+    ct = summarize_competition(_comp(best_composite_score=0.99, win_margin=0.02))
+    assert ct is not None and ct.score_to_beat == pytest.approx(1.01)
+    assert not ct.reachable                                 # a perfect 1.0 still wouldn't clear it
+
+
+def test_summarize_competition_none_without_competition():
+    assert summarize_competition({"benchmarks": {}}) is None
+    assert summarize_competition({}) is None
+    assert summarize_competition({"competition": 7}) is None
+
+
+def test_competition_tolerates_missing_and_string_fields():
+    ct = summarize_competition({"competition": {
+        "best_composite_score": "0.5", "win_margin": "0.02",
+        "best_per_benchmark": {"math500": "0.6", "mmlu": None}}})
+    assert ct is not None
+    assert ct.score_to_beat == pytest.approx(0.52)
+    assert ct.best_per_benchmark == {"math500": 0.6}        # null dropped, string coerced
+    assert ct.benchmarks == [] and not ct.has_king
+
+
+def test_competition_to_dict_roundtrips_json():
+    ct = summarize_competition(_comp(best_composite_score=0.7, best_miner="bob"))
+    d = ct.to_dict()
+    assert json.loads(json.dumps(d))["score_to_beat"] == pytest.approx(0.72)
+    assert d["has_king"] is True and d["reachable"] is True
+
+
+def test_the_repo_leaderboard_composite_target_parses():
+    ct = summarize_competition(load_leaderboard(_REPO_LB))
+    assert ct is not None                                   # the committed file has a competition
+    assert ct.score_to_beat == pytest.approx(ct.current_best + ct.win_margin)
+
+
+if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
