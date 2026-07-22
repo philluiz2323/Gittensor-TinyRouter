@@ -137,11 +137,41 @@ def _normalize_token(raw: str) -> str:
         return _PUNCT.sub("", raw)
 
 
+def _split_internal_hyphens(token: str) -> list[str]:
+    """Split ``token`` on INTERNAL hyphens, matching DROP's ``re.split(" |-", ...)``.
+
+    DROP's official ``_normalize`` tokenizes on hyphens as well as whitespace, so a
+    hyphenated span/range (``"1994-1995"``, ``"20-yard"``) and the same answer written
+    with spaces are equal. A LEADING sign is *not* split off, preserving this module's
+    deliberate negative-number strictness (``"-5"`` must not match ``"5"``): only a
+    hyphen with content before it is a separator.
+
+    Args:
+        token: One whitespace-delimited token.
+
+    Returns:
+        The token's hyphen-separated parts (empties dropped), the leading sign kept on
+        the first part.
+    """
+    if "-" not in token:
+        return [token]
+    sign, body = ("", token)
+    if body[:1] in ("+", "-"):
+        sign, body = body[0], body[1:]
+    parts = [p for p in body.split("-") if p]
+    if not parts:
+        return [token] if not sign else []
+    parts[0] = sign + parts[0]
+    return parts
+
+
 def _normalize_tokens(text: str) -> list[str]:
-    """DROP answer normalization -> token list: lower-case, strip articles, then
-    per-token punctuation/number normalization; empty tokens are dropped."""
+    """DROP answer normalization -> token list: lower-case, strip articles, split on
+    whitespace and internal hyphens, then per-token punctuation/number normalization;
+    empty tokens are dropped."""
     s = _ARTICLES.sub(" ", str(text).lower())
-    return [tok for tok in (_normalize_token(r) for r in s.split()) if tok]
+    raw = [sub for tok in s.split() for sub in _split_internal_hyphens(tok)]
+    return [tok for tok in (_normalize_token(r) for r in raw) if tok]
 
 
 def _f1(pred_tokens: list[str], gold_tokens: list[str]) -> float:
