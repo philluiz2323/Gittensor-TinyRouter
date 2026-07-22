@@ -89,12 +89,18 @@ class CoordinatorEncoder:
         The loaded tokenizer.
     """
 
+    #: Which output position ``encode`` reads. Declared at class level so an
+    #: instance built without ``__init__`` (``object.__new__``, as the offline
+    #: tests do) still reads SPEC §3.2's canonical penultimate token.
+    token_index: int = -2
+
     def __init__(
         self,
         model_name: str = "Qwen/Qwen3-0.6B",
         device: str = "cuda:0",
         dtype: str = "bfloat16",
         l2_normalize: bool = True,
+        token_index: int = -2,
     ) -> None:
         # Lazy, file-local imports: the dev machine has no torch/GPU.
         import torch
@@ -103,6 +109,10 @@ class CoordinatorEncoder:
         self.model_name = model_name
         self.device = device
         self.l2_normalize = bool(l2_normalize)
+        # Which output position to read. -2 (penultimate) is SPEC §3.2's
+        # canonical choice and the default; -1 (the appended EOS) is R9's
+        # `last_token` ablation -- see coordinator.encoder_ablations.
+        self.token_index = int(token_index)
 
         self._torch = torch
         self._dtype = self._resolve_dtype(dtype)
@@ -241,8 +251,9 @@ class CoordinatorEncoder:
 
         # hidden_states is a tuple of (num_layers + 1) tensors, each
         # (batch, seq_len, hidden_size); [-1] is the final layer. Index -2 along
-        # the sequence is the penultimate (NOT EOS) output token.
-        h = out.hidden_states[-1][0, -2, :]
+        # the sequence is the penultimate (NOT EOS) output token -- the default,
+        # and what SPEC §3.2 specifies.
+        h = out.hidden_states[-1][0, self.token_index, :]
         h = h.to(torch.float32)
 
         if self.l2_normalize:
@@ -259,9 +270,11 @@ class CoordinatorEncoder:
     ) -> "CoordinatorEncoder":
         """Construct from ``configs/trinity.yaml`` ``coordinator`` block.
 
-        Reads ``encoder_model``, ``device``, ``dtype`` and
-        ``hidden_state.l2_normalize`` so callers stay in sync with the spec
-        config without duplicating literals.
+        Reads ``encoder_model``, ``device``, ``dtype``,
+        ``hidden_state.l2_normalize`` and the optional
+        ``hidden_state.token_index`` so callers stay in sync with the spec
+        config without duplicating literals. An absent ``token_index`` keeps
+        SPEC §3.2's penultimate position, so the shipped config is unchanged.
         """
         cfg = yaml.safe_load(Path(config_path).read_text())
         coord = cfg["coordinator"]
@@ -271,6 +284,7 @@ class CoordinatorEncoder:
             device=coord.get("device", "cuda:0"),
             dtype=coord.get("dtype", "bfloat16"),
             l2_normalize=bool(hs.get("l2_normalize", True)),
+            token_index=int(hs.get("token_index", -2)),
         )
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
