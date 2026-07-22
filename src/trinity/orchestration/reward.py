@@ -571,6 +571,44 @@ def _unwrap_latex_fractions(s: str) -> str:
     return s
 
 
+def _normalize_braced_exponents(s: str) -> str:
+    r"""Canonicalize caret powers so ``a^{b}`` and ``a^b`` normalize alike.
+
+    ``2^{10}`` and ``2^10`` are the same value; leaving braces (or mixing braced
+    vs bare spelling) made exact normalize comparison fail with no sympy
+    fallback (issue #434). Braced exponents become ``^(...)``; bare numeric /
+    single-letter exponents are wrapped the same way.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(s):
+        if s[i] == "^" and i + 1 < len(s) and s[i + 1] == "{":
+            depth = 0
+            j = i + 1
+            end = -1
+            while j < len(s):
+                if s[j] == "{":
+                    depth += 1
+                elif s[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = j
+                        break
+                j += 1
+            if end != -1:
+                inner = s[i + 2 : end]
+                out.append("^(")
+                out.append(inner)
+                out.append(")")
+                i = end + 1
+                continue
+        out.append(s[i])
+        i += 1
+    s = "".join(out)
+    # Bare ``2^10`` / ``10^-2`` → ``2^(10)`` / ``10^(-2)`` (skip already-wrapped).
+    return re.sub(r"\^(?!\()([+-]?\d+|[A-Za-z])", r"^(\1)", s)
+
+
 def normalize_math_answer(ans: str | None) -> str:
     r"""Normalize a math answer string for robust comparison.
 
@@ -644,6 +682,7 @@ def normalize_math_answer(ans: str | None) -> str:
     # so a fraction nested inside the radicand is already unwrapped.
     s = re.sub(r"\\sqrt\s*\{([^{}]*)\}", r"sqrt(\1)", s)
     s = re.sub(r"\\sqrt\s*([0-9a-zA-Z])", r"sqrt(\1)", s)
+    s = _normalize_braced_exponents(s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
     # Canonicalize the constant pi to a bare ``pi`` token. Models and datasets
     # write the same value three ways — the LaTeX ``\pi`` command, the Unicode
