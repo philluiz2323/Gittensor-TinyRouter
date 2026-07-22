@@ -327,7 +327,11 @@ def format_hint(benchmark: str) -> str:
     so every worker is told exactly how to present the final answer for this
     benchmark, matching what :mod:`trinity.orchestration.reward` extracts.
     """
-    key = (benchmark or "").strip().lower()
+    from trinity.orchestration import reward as R
+
+    # Resolve versioned identities (e.g. livecodebench_v6 → livecodebench) so
+    # the hint matches what reward.score_text grades (issue #389).
+    key = R.resolve_benchmark(benchmark)
     if key in {"mmlu", "gpqa", "gpqa-diamond", "gpqa_diamond"}:
         return "End with the final answer on its own line as: Answer: X  (X is one of A, B, C, D)."
     if key in {"livecodebench", "lcb", "bigcodebench", "bigcode"}:
