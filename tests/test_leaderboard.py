@@ -56,6 +56,27 @@ def test_negative_differences_are_clamped_to_zero():
     assert t.captured == 0.0 and t.remaining == 0.0 and t.headroom == 0.0
 
 
+def test_remaining_is_floored_at_best_single_model():
+    # Seed / early state: best_score is still below the strongest single model, so no
+    # routing headroom has been claimed. A trivial router already reaches
+    # best_single_model, so the headroom still on the table is oracle - best_single,
+    # NOT oracle - best_score. captured + remaining must equal headroom.
+    t = summarize_targets(_lb(x=_entry(best_score=0.0, best_single_model=0.817,
+                                       oracle_ceiling=0.856)))[0]
+    assert t.captured == 0.0
+    assert t.headroom == 0.856 - 0.817
+    assert t.remaining == 0.856 - 0.817          # was 0.856 (oracle - best_score) below the floor
+    assert t.captured + t.remaining == t.headroom
+
+
+def test_no_routing_headroom_seed_is_uncontested():
+    # oracle == best_single: a perfect router cannot beat the best single model, so
+    # there is nothing left to win even though best_score is still 0 (seed).
+    t = summarize_targets(_lb(x=_entry(best_score=0.0, best_single_model=0.92,
+                                       oracle_ceiling=0.92)))[0]
+    assert t.remaining == 0.0 and not t.contested   # was remaining 0.92, wrongly "contested"
+
+
 # ---------------------------------------------------------------------------
 # robustness
 # ---------------------------------------------------------------------------

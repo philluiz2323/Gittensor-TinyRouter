@@ -75,8 +75,14 @@ class BenchmarkTarget:
 
     @property
     def remaining(self) -> float:
-        """Headroom still unclaimed above the current best: ``oracle - best`` (>= 0)."""
-        return max(0.0, self.oracle_ceiling - self.score_to_beat)
+        """Routing headroom still on the table above the trivial single-model floor.
+
+        ``oracle_ceiling - max(score_to_beat, best_single_model)`` (>= 0). A router
+        trivially reaches ``best_single_model``, so until someone beats that floor the
+        unclaimed headroom is measured from the floor, not from a below-floor
+        ``best_score``. This keeps the identity ``captured + remaining == headroom``.
+        """
+        return max(0.0, self.oracle_ceiling - max(self.score_to_beat, self.best_single_model))
 
     @property
     def contested(self) -> bool:
