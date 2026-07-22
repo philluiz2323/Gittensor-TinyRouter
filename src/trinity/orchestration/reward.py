@@ -664,6 +664,15 @@ def normalize_math_answer(ans: str | None) -> str:
         r"\1\2",
         s,
     )
+    # Mixed numbers: "1 1/2" must become 3/2, not "11/2" after whitespace
+    # collapse (issue #438). Convert before spaces are removed.
+    def _mixed_number(m: re.Match[str]) -> str:
+        whole, num, den = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if den == 0:
+            return m.group(0)
+        return f"{whole * den + num}/{den}"
+
+    s = re.sub(r"(-?\d+)\s+(\d+)\s*/\s*(\d+)", _mixed_number, s)
     s = re.sub(r"\s+", "", s)
     # LaTeX digit grouping "1{,}000" -> "1,000" so the comma-strip below removes it
     # (a boxed answer like \boxed{2{,}048} otherwise never matches "2048").
