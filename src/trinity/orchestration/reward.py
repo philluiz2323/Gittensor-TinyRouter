@@ -808,9 +808,35 @@ def _strip_choice_md_emphasis(text: str) -> str:
 _COMMITTED_ANSWER_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
-    re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-J])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
+    # The English article ``a`` (and pronoun ``I``) must not count as a choice: under
+    # ``re.I``, ``[A-J]`` matches them and ``(?:[\).:]|\b)`` accepts the space after
+    # an article via zero-width ``\b`` (issue #413). Keywords stay case-insensitive;
+    # the letter class itself is case-sensitive — uppercase may use ``\b``, lowercase
+    # needs an explicit delimiter / end-of-line.
+    re.compile(
+        r"(?i:answer\s*(?:is|:)?\s*\(?\s*)"
+        r"(?:"
+        # Uppercase A–J except bare pronoun I (``I think`` / ``I believe``) —
+        # I only counts with an explicit delimiter. Other uppercase letters may
+        # still end at a word boundary (``The answer is A because...``).
+        r"([A-HJ])\s*(?:[\).:}]|\b)(?![A-Za-z])"
+        r"|"
+        r"([Ii])\s*(?:[\).:}]|(?=\s*$)|(?=\s*[\r\n]))"
+        r"|"
+        r"([a-hj])\s*(?:[\).:}]|(?=\s*$)|(?=\s*[\r\n]))"
+        r")"
+    ),
     re.compile(r"\\boxed\s*\{\s*\(?\s*([A-J])\s*\)?\s*\}", re.I),
-    re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-J])(?![A-Za-z])", re.I),
+    re.compile(
+        r"(?i:\bfinal\s+answer\s*[:=]?\s*\(?\s*)"
+        r"(?:"
+        r"([A-HJ])(?![A-Za-z])"
+        r"|"
+        r"([Ii])(?=\s*(?:[\).:}]|$|[\r\n]))"
+        r"|"
+        r"([a-hj])(?=\s*(?:[\).:}]|$|[\r\n]))"
+        r")"
+    ),
 )
 # Weaker cues, kept as strictly lower tiers so they never override a committed answer:
 # ``option B`` often *discusses* a choice ("option B is wrong"), and a bare ``B)`` line
@@ -860,9 +886,12 @@ def extract_choice_letter(text: str) -> str | None:
     best: tuple[tuple[int, int], str] | None = None
     for priority, pat in enumerate(_COMMITTED_ANSWER_PATTERNS):
         for cm in pat.finditer(text):
+            letter = next((g for g in cm.groups() if g), None)
+            if letter is None:
+                continue
             key = (cm.end(), -priority)
             if best is None or key > best[0]:
-                best = (key, cm.group(1).upper())
+                best = (key, letter.upper())
     if best is not None:
         return best[1]
     # No committed-answer phrasing: fall back to the weaker cues, each as its own

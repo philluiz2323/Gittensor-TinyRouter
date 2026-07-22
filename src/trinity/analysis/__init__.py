@@ -86,8 +86,6 @@ from trinity.analysis.grader_audit import (
     audit_item,
     benchmark_kind,
 )
-<<<<<<< HEAD
-<<<<<<< HEAD
 from trinity.analysis.union_diagnostics import (
     UnionModelSampling,
     UnionModelSelective,
@@ -95,15 +93,13 @@ from trinity.analysis.union_diagnostics import (
     UnionSelectiveSummary,
     union_sampling,
     union_selective,
-=======
+)
 from trinity.analysis.oracle_column import (
     Estimate,
     OracleColumns,
     from_oracle_report,
     index_by_benchmark,
->>>>>>> f319b1f (feat(results_table): oracle / headroom / gap-closed columns (ORACLE §7 item 3))
 )
-=======
 from trinity.analysis.definition_of_done import (
     DOD_INVARIANTS,
     DOD_MIN_TASKS,
@@ -112,7 +108,6 @@ from trinity.analysis.definition_of_done import (
     assess_task,
 )
 from trinity.analysis.definition_of_done import assess as assess_definition_of_done
->>>>>>> 9e31ba3 (feat(analysis): SPEC definition-of-done roll-up (R1–R4 + R8 on ≥2 tasks))
 
 __all__ = [
     "AgreementSummary",
