@@ -129,7 +129,18 @@ def _normalize_token(raw: str) -> str:
     is no longer corrupted to ``"12345"``) and a **leading sign is preserved** (``"-5"``
     stays negative, so it does not falsely match ``"5"``) — matching DROP's ``_normalize``,
     as this docstring already promised but the old ``strip(string.punctuation)`` (which
-    dropped the ``-`` and left commas to break ``float()``) did not deliver."""
+    dropped the ``-`` and left commas to break ``float()``) did not deliver.
+
+    A token that is ALREADY a number is recognised before any punctuation is
+    stripped: the edge-strip set includes ``.``, so a leading-decimal token like
+    ``".5"`` would otherwise lose its point and normalize to ``"5.0"`` — equal to
+    a gold ``"5"`` (false positive) and unequal to the value-identical gold
+    ``"0.5"`` (false negative). The official DROP ``_remove_punc`` tests
+    ``_is_number`` first and leaves numbers untouched for exactly this reason."""
+    try:
+        return str(float(raw.replace(",", "")))
+    except ValueError:
+        pass
     core = raw.strip(_STRIP_EDGE)
     try:
         return str(float(core.replace(",", "")))
