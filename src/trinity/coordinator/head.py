@@ -168,8 +168,23 @@ class LinearHead(torch.nn.Module):
         role_probs = torch.softmax(role_logits, dim=-1)
 
         if sample:
-            agent_idx = int(torch.multinomial(agent_probs, 1, generator=rng).item())
-            role_pos = int(torch.multinomial(role_probs, 1, generator=rng).item())
+            # Draw on the generator's device. Training fitness passes a CPU
+            # ``torch.Generator`` (``optim.sampling.trajectory_sampling_rng``)
+            # while the head lives on the training GPU, and
+            # ``torch.multinomial`` requires its input and generator to share a
+            # device — mixing them raises ``RuntimeError: Expected a 'cuda'
+            # device type for generator but found 'cpu'`` on the first turn of
+            # every trajectory. Sampling on ``rng``'s device also keeps the
+            # seeded draw device-independent: the same ``--seed`` picks the
+            # same (agent, role) whether the head runs on CPU or CUDA. The
+            # moved tensors are (n_models,) / (n_roles,) — a few floats.
+            device = rng.device if rng is not None else agent_probs.device
+            agent_idx = int(
+                torch.multinomial(agent_probs.to(device), 1, generator=rng).item()
+            )
+            role_pos = int(
+                torch.multinomial(role_probs.to(device), 1, generator=rng).item()
+            )
         else:
             agent_idx = int(torch.argmax(agent_logits, dim=-1).item())
             role_pos = int(torch.argmax(role_logits, dim=-1).item())

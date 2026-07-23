@@ -243,3 +243,66 @@ def test_sampled_indices_are_always_in_range():
         idx, role, _ = head.select(h, sample=True, rng=torch.Generator().manual_seed(seed))
         assert 0 <= idx < head.n_models
         assert role in ROLE_ORDER
+
+
+def test_sampling_draws_on_the_generator_device_not_the_heads(monkeypatch):
+    """Regression: GPU training crashed every sampled trajectory (issue: device mix).
+
+    ``optim.fitness.evaluate_candidate`` passes a **CPU** ``torch.Generator``
+    (from ``optim.sampling.trajectory_sampling_rng``) while the head — and so
+    the softmax probs — lives on the training GPU (``configs/trinity.yaml``
+    sets ``device: cuda:0``). ``torch.multinomial`` requires its input and its
+    generator to share a device, so ``select(..., sample=True)`` raised
+    ``RuntimeError: Expected a 'cuda' device type for generator but found
+    'cpu'`` on the first turn of every trajectory; the gather's
+    ``return_exceptions=True`` swallowed it and every candidate scored 0.
+
+    CI has no GPU, so the mismatch is simulated with a ``meta``-device
+    generator stand-in and a ``multinomial`` spy: ``select`` must move the
+    probs onto the *generator's* device before drawing.
+    """
+    torch = _torch()
+    head = _head()
+    head.load_weight(torch.randn(6, 4))
+    h = torch.randn(4)
+
+    class _MetaGenerator:
+        """Duck-typed generator pinned to a device the head is not on."""
+
+        device = torch.device("meta")
+
+    seen: list[tuple] = []
+
+    def _spy(probs, num_samples, generator=None):
+        seen.append((probs.device, generator.device))
+        return torch.zeros(num_samples, dtype=torch.long)
+
+    monkeypatch.setattr(torch, "multinomial", _spy)
+    idx, role, dbg = head.select(h, sample=True, rng=_MetaGenerator())
+
+    assert len(seen) == 2  # one draw per logit group (agent, role)
+    for probs_device, gen_device in seen:
+        assert probs_device == gen_device == torch.device("meta")
+    # The spy always picks index 0; the wiring around it must be intact.
+    assert idx == 0
+    assert role is ROLE_ORDER[0]
+    assert dbg["sampled"] is True
+
+
+def test_sampling_without_a_generator_stays_on_the_probs_device(monkeypatch):
+    """``rng=None`` (eval-time sampling paths) must not move the probs at all."""
+    torch = _torch()
+    head = _head()
+    head.load_weight(torch.randn(6, 4))
+    h = torch.randn(4)
+
+    seen: list = []
+
+    def _spy(probs, num_samples, generator=None):
+        seen.append(probs.device)
+        return torch.zeros(num_samples, dtype=torch.long)
+
+    monkeypatch.setattr(torch, "multinomial", _spy)
+    head.select(h, sample=True, rng=None)
+
+    assert seen == [h.device, h.device]
