@@ -609,6 +609,38 @@ def _normalize_braced_exponents(s: str) -> str:
     return re.sub(r"\^(?!\()([+-]?\d+|[A-Za-z])", r"^(\1)", s)
 
 
+def _peel_outer_parens(s: str) -> str:
+    """Peel balanced outer ``(...)`` wrappers that wrap the whole string.
+
+    After ``\\left``/sizing delimiters are deleted, a presentation-wrapped
+    fraction becomes ``((a)/(b))``. The Fraction canonicalizer only accepts a
+    single optional paren layer per operand, so those outer wrappers must go
+    (issue #432). Stops when the outermost pair is not a single balanced wrap
+    of the entire string, or when the interior is a top-level comma list
+    (``(5, 120)`` — those parens are value, not sizing).
+    """
+    while len(s) >= 2 and s[0] == "(" and s[-1] == ")":
+        depth = 0
+        wraps_all = True
+        top_level_comma = False
+        for i, ch in enumerate(s):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0 and i != len(s) - 1:
+                    wraps_all = False
+                    break
+                if depth < 0:
+                    wraps_all = False
+                    break
+            elif ch == "," and depth == 1:
+                # Comma inside the outer wrap → tuple/list, not a sized scalar.
+                top_level_comma = True
+        if not wraps_all or depth != 0 or top_level_comma:
+            break
+        s = s[1:-1]
+    return s
 def normalize_math_answer(ans: str | None) -> str:
     r"""Normalize a math answer string for robust comparison.
 
@@ -641,8 +673,36 @@ def normalize_math_answer(ans: str | None) -> str:
     # Remove math-mode delimiters. Strip the escaped dollar ``\$`` BEFORE the bare
     # ``$``; the reverse order leaves a stray backslash ("\$18.90" -> "\18.90")
     # and turns a correct dollar answer into a false negative.
-    for tok in (r"\$", "$", r"\left", r"\right", r"\!", r"\,", r"\;", r"\:", r"\(", r"\)"):
+    # Sizing delimiters (``\left``/``\right``, ``\bigl``/``\bigr``, …) are
+    # presentation-only; strip LONGEST names first so ``\Biggl`` is not eaten as
+    # ``\Bigg`` + leftover ``l``. The paren glyphs they wrap stay until the
+    # outer-paren peel below (issue #432).
+    for tok in (
+        r"\$",
+        "$",
+        r"\Biggl",
+        r"\Biggr",
+        r"\biggl",
+        r"\biggr",
+        r"\Bigl",
+        r"\Bigr",
+        r"\bigl",
+        r"\bigr",
+        r"\Bigg",
+        r"\bigg",
+        r"\Big",
+        r"\big",
+        r"\left",
+        r"\right",
+        r"\!",
+        r"\,",
+        r"\;",
+        r"\:",
+        r"\(",
+        r"\)",
+    ):
         s = s.replace(tok, "")
+
     # Unwrap LaTeX font/style commands to their content. These change only how the
     # answer looks, not its value, so \mathbf{5} must normalize to 5 exactly as
     # \text{5}/\mathrm{5} already do (otherwise a bold-formatted answer is a false
@@ -715,9 +775,15 @@ def normalize_math_answer(ans: str | None) -> str:
 
     s = re.sub(r"(-?\d+)\s+(\d+)\s*/\s*(\d+)", _mixed_number, s)
     s = re.sub(r"\s+", "", s)
+    # Presentation wrappers left by deleted ``\left``/``\bigl``/… (issue #432).
+    # Always peel here: ``structured_answer`` is also True for any braced LaTeX
+    # (``\frac{1}{2}``), which would otherwise skip the fix; tuple parens are
+    # preserved inside ``_peel_outer_parens`` via the top-level-comma guard.
+    s = _peel_outer_parens(s)
     # LaTeX digit grouping "1{,}000" -> "1,000" so the comma-strip below removes it
     # (a boxed answer like \boxed{2{,}048} otherwise never matches "2048").
     s = s.replace("{,}", ",")
+
     # Strip digit-grouping commas ("2,000" -> "2000", "1,000,000" -> "1000000") so
     # a thousands-separated answer is not a false negative. Skip when the answer
     # looks like a set/tuple/list — otherwise ``{2, 100}`` merges to ``2100`` (issue
