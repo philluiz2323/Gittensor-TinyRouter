@@ -427,6 +427,8 @@ def extract_last_number(text: str) -> str | None:
         rf"-?\\[dt]?frac(?![a-zA-Z])\s*(?:{brace}\s*{brace}|\d\s*\d)"
         rf"|-?\d*\s*\\sqrt(?![a-zA-Z])\s*(?:{brace}|[0-9a-zA-Z])"
         r"|-?\d+\s*/\s*-?\d+"
+        # Scientific notation BEFORE bare decimals so "1e3" is not read as "3".
+        r"|-?(?:\d+(?:\.\d+)?|\.\d+)[eE][+-]?\d+"
         r"|-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
         r"|-?\.\d+"
     )
